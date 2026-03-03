@@ -948,18 +948,37 @@ function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     return false;
 }
 
-async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [], problemCount = 7 }) {
+function normalizeRoomProblems(problems = [], problemCount = 7) {
+    if (Array.isArray(problems) && problems.length > 0) {
+        return problems.map(problem => ({
+            points: Math.max(1, Number(problem?.points) || 1),
+            rating: Math.max(800, Math.min(3500, Number(problem?.rating) || 800))
+        }));
+    }
+
+    return buildDefaultProblems(problemCount);
+}
+
+function createRoomWithSharedLogic({
+    hostHandle,
+    hostWs = null,
+    opponentHandle,
+    roomName,
+    duration = 40,
+    interval = 1,
+    problems = [],
+    problemCount = 7,
+    validationFailureMessage = 'Validation problem generation failed. Please recreate room.'
+}) {
     const roomId = generateRoomId();
     const validationProblem = null;
-    const normalizedProblems = Array.isArray(problems) && problems.length > 0
-        ? problems
-        : buildDefaultProblems(problemCount);
+    const normalizedProblems = normalizeRoomProblems(problems, problemCount);
 
     const room = {
         id: roomId,
         name: roomName,
         players: [
-            { handle: hostHandle, ws: null }
+            { handle: hostHandle, ws: hostWs }
         ],
         host: hostHandle,
         opponentHandle,
@@ -1022,7 +1041,7 @@ async function createBracketRoom({ hostHandle, opponentHandle, roomName, duratio
             broadcastValidationStatus(currentRoom, {
                 pair: [],
                 statuses: {},
-                message: 'Validation problem generation failed. Please create a new room.'
+                message: validationFailureMessage
             });
         });
 
@@ -1030,6 +1049,20 @@ async function createBracketRoom({ hostHandle, opponentHandle, roomName, duratio
     broadcastActiveRooms();
 
     return room;
+}
+
+async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [], problemCount = 7 }) {
+    return createRoomWithSharedLogic({
+        hostHandle,
+        hostWs: null,
+        opponentHandle,
+        roomName,
+        duration,
+        interval,
+        problems,
+        problemCount,
+        validationFailureMessage: 'Validation problem generation failed. Please create a new room.'
+    });
 }
 
 // Broadcast active rooms
@@ -1155,94 +1188,28 @@ async function handleCreateRoom(ws, data) {
         return;
     }
 
-    const roomId = generateRoomId();
-    const validationProblem = null;
-    
-    const room = {
-        id: roomId,
-        name: roomName,
-        players: [
-            { handle: data.handle, ws }
-        ],
-        host: data.handle,
+    const room = createRoomWithSharedLogic({
+        hostHandle: data.handle,
+        hostWs: ws,
         opponentHandle,
-        duration: data.duration,
-        interval: data.interval,
-        problems: data.problems,
-        validationProblem,
-        battleState: null,
-        createdAt: Date.now(),
-        endTimeout: null,
-        cleanupTimeout: null,
-        noOpponentTimeout: null,
-        countdownTimeout: null,
-        countdownEndsAt: null,
-        countdownInProgress: false,
-        preGeneratedFirstProblem: null,
-        pendingSubmissionActive: false,
-        validationCheckInProgress: false,
-        startInProgress: false,
-        breakAdvanceTimeout: null
-    };
-    
-    rooms.set(roomId, room);
+        roomName,
+        duration: Number(data.duration) || 40,
+        interval: Number(data.interval) || 1,
+        problems: Array.isArray(data.problems) ? data.problems : [],
+        problemCount: Array.isArray(data.problems) ? data.problems.length : 7,
+        validationFailureMessage: 'Validation problem generation failed. Please recreate room.'
+    });
     
     ws.send(JSON.stringify({
         type: 'ROOM_CREATED',
-        roomId: roomId,
+        roomId: room.id,
         roomName: roomName,
         opponentHandle: room.opponentHandle,
-        duration: data.duration,
-        interval: data.interval,
-        problems: data.problems,
-        validationProblem
+        duration: room.duration,
+        interval: room.interval,
+        problems: room.problems,
+        validationProblem: room.validationProblem
     }));
-
-    room.noOpponentTimeout = setTimeout(() => {
-        const currentRoom = rooms.get(roomId);
-        if (!currentRoom) return;
-        if (currentRoom.battleState) return;
-        if (getAssignedPlayersCount(currentRoom) >= 2) return;
-
-        sendToRoom(currentRoom, {
-            type: 'ROOM_CLOSED',
-            roomId: currentRoom.id,
-            message: 'Room closed: no opponent joined within 10 minutes.'
-        });
-
-        rooms.delete(roomId);
-        broadcastActiveRooms();
-    }, ROOM_NO_OPPONENT_TIMEOUT_MS);
-
-    generateValidationProblem()
-        .then(problem => {
-            const currentRoom = rooms.get(roomId);
-            if (!currentRoom || currentRoom.battleState) return;
-
-            currentRoom.validationProblem = problem;
-            sendToRoom(currentRoom, {
-                type: 'VALIDATION_PROBLEM_READY',
-                roomId: currentRoom.id,
-                validationProblem: problem
-            });
-
-            evaluateRoomValidationAndAutoStart(currentRoom).catch(() => {});
-        })
-        .catch(error => {
-            console.error('Validation problem generation failed:', error);
-            const currentRoom = rooms.get(roomId);
-            if (!currentRoom) return;
-
-            broadcastValidationStatus(currentRoom, {
-                pair: [],
-                statuses: {},
-                message: 'Validation problem generation failed. Please recreate room.'
-            });
-        });
-
-    evaluateRoomValidationAndAutoStart(room).catch(() => {});
-    
-    broadcastActiveRooms();
 }
 
 function handlePendingSubmissionStatus(ws, data) {
