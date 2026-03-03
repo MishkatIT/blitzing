@@ -277,6 +277,29 @@ body {
     margin-top: 12px;
 }
 
+.site-footer {
+    margin: 16px auto 0;
+    max-width: 1280px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.5;
+    font-size: 0.9rem;
+}
+
+.site-footer a {
+    color: #9dc4ff;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.site-footer a:hover {
+    text-decoration: underline;
+}
+
 @media (max-width: 980px) {
     .stats-grid {
         grid-template-columns: 1fr;

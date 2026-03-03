@@ -177,6 +177,26 @@
         return 'blitzUserAvatar';
     }
 
+    function getPendingJoinRoomIdKey() {
+        return 'blitzPendingJoinRoomId';
+    }
+
+    function tryJoinPendingRoom() {
+        const pendingRoomId = (localStorage.getItem(getPendingJoinRoomIdKey()) || '').trim().toUpperCase();
+        if (!pendingRoomId) return;
+        if (!userHandle) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        joinRoomIdInput.value = pendingRoomId;
+        ws.send(JSON.stringify({
+            type: 'JOIN_ROOM',
+            roomId: pendingRoomId,
+            handle: userHandle
+        }));
+
+        localStorage.removeItem(getPendingJoinRoomIdKey());
+    }
+
     function renderLoggedInfo() {
         if (!userHandle) {
             loggedInfo.classList.remove('user-chip');
@@ -327,6 +347,8 @@
             } else {
                 ws.send(JSON.stringify({ type: 'GET_ACTIVE_ROOMS' }));
             }
+
+            tryJoinPendingRoom();
         };
         
         ws.onmessage = (event) => {
@@ -503,6 +525,18 @@
                 if (!solveNotificationKeys.has(solveKey)) {
                     solveNotificationKeys.add(solveKey);
                     showDesktopNotification('✅ Problem Solved!', `${data.solverHandle} solved Problem ${data.problemNumber}!`, false, true);
+                }
+
+                if (battleActive && !problemLocked) {
+                    const solvedProblemNumber = Number(data.problemNumber) || 0;
+                    const isCurrentProblem = solvedProblemNumber === currentProblemIndex;
+                    if (isCurrentProblem) {
+                        if (data.solverHandle === player1Handle) {
+                            handleSolve('p1');
+                        } else if (data.solverHandle === player2Handle) {
+                            handleSolve('p2');
+                        }
+                    }
                 }
                 break;
             }
@@ -1755,7 +1789,7 @@
     function startBreak() {
         breakActive = true;
         breakSecondsLeft = 60;
-        breakStartTime = Date.now();
+        breakStartTime = getSyncedNow();
 
         if (currentProblemIndex < problems.length) {
             queuedNextProblem = selectedProblems[currentProblemIndex] || null;

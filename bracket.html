@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PUC Blitz Cup · Bracket</title>
+    <link rel="stylesheet" href="bracket.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header-card">
+            <div>
+                <h1>Bracket Builder</h1>
+                <p class="subtitle">Create tournament structure for your blitz events</p>
+            </div>
+            <div class="header-actions">
+                <a href="index.html" class="nav-btn">Arena</a>
+                <a href="results.html" class="nav-btn">Results</a>
+            </div>
+        </header>
+
+        <section class="panel">
+            <h2>Choose tournament type</h2>
+            <div class="type-grid" id="typeGrid">
+                <label class="type-card selected" data-type="round-robin">
+                    <input type="radio" name="tournamentType" value="round-robin" checked>
+                    <h3>Round Robin</h3>
+                    <p>Everyone plays with everyone, and the winner is determined by scores.</p>
+                </label>
+
+                <label class="type-card" data-type="single-elimination">
+                    <input type="radio" name="tournamentType" value="single-elimination">
+                    <h3>Single Elimination</h3>
+                    <p>Participants play one game each, and losers leave the tournament.</p>
+                </label>
+
+                <label class="type-card" data-type="double-elimination">
+                    <input type="radio" name="tournamentType" value="double-elimination">
+                    <h3>Double Elimination</h3>
+                    <p>Players get a second chance through a losers bracket before finals.</p>
+                </label>
+            </div>
+
+            <div class="form-grid">
+                <div>
+                    <label for="tournamentName">Tournament name</label>
+                    <input id="tournamentName" type="text" placeholder="PUC Blitz Cup Finals">
+                </div>
+                <div>
+                    <label for="participantsInput">Participants (one per line)</label>
+                    <textarea id="participantsInput" rows="10" placeholder="tourist&#10;Benq&#10;ecnerwala&#10;Petr"></textarea>
+                    <div class="participants-tools">
+                        <button id="shuffleNamesBtn" type="button" class="small-btn">Shuffle Names</button>
+                    </div>
+                    <div id="shuffledNamesPreview" class="note" style="display:none;"></div>
+                </div>
+            </div>
+
+            <button id="generateBracketBtn" class="primary-btn">Generate Bracket</button>
+        </section>
+
+        <section class="panel" id="outputPanel" style="display:none;">
+            <div class="output-head">
+                <h2 id="outputTitle">Tournament Preview</h2>
+                <span class="meta" id="outputMeta"></span>
+            </div>
+            <div id="outputContent"></div>
+        </section>
+
+        <section class="panel">
+            <div class="output-head">
+                <h2>Saved Brackets</h2>
+                <span class="meta">Create brackets above, then manage matches here</span>
+            </div>
+            <div id="savedBracketsList" class="saved-list"></div>
+        </section>
+
+        <footer class="site-footer">
+            <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
+            <p>
+                Developers:
+                <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,
+                <a href="https://codeforces.com/profile/MishkatIT" target="_blank" rel="noopener noreferrer">Mishkat</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="bracket.js"></script>
+</body>
+</html>

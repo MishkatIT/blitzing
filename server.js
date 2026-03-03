@@ -12,6 +12,7 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
 const RESULTS_FILE = path.join(__dirname, 'results.json');
+const BRACKETS_FILE = path.join(__dirname, 'brackets.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
 const ROOM_NO_OPPONENT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -33,6 +34,14 @@ async function initResultsFile() {
         await fs.access(RESULTS_FILE);
     } catch {
         await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
+    }
+}
+
+async function initBracketsFile() {
+    try {
+        await fs.access(BRACKETS_FILE);
+    } catch {
+        await fs.writeFile(BRACKETS_FILE, JSON.stringify([]));
     }
 }
 
@@ -62,6 +71,208 @@ function ensureSequentialBlitzNumbers(results = []) {
     });
 
     return { normalized, changed };
+}
+
+async function readBrackets() {
+    const raw = await fs.readFile(BRACKETS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+}
+
+async function writeBrackets(brackets) {
+    await fs.writeFile(BRACKETS_FILE, JSON.stringify(brackets, null, 2));
+}
+
+function normalizeParticipants(participants = []) {
+    const cleaned = participants
+        .map(item => String(item || '').trim())
+        .filter(Boolean);
+    return Array.from(new Set(cleaned));
+}
+
+function generateRoundRobinMatches(participants) {
+    const players = [...participants];
+    if (players.length % 2 !== 0) players.push('BYE');
+
+    const rounds = players.length - 1;
+    const half = players.length / 2;
+    const matches = [];
+    let matchSeq = 1;
+
+    for (let round = 0; round < rounds; round++) {
+        for (let i = 0; i < half; i++) {
+            const p1 = players[i];
+            const p2 = players[players.length - 1 - i];
+            if (p1 !== 'BYE' && p2 !== 'BYE') {
+                matches.push({
+                    id: `m${matchSeq++}`,
+                    round: round + 1,
+                    label: `Round ${round + 1} · Match ${i + 1}`,
+                    p1,
+                    p2,
+                    bracketSide: 'main',
+                    status: 'pending',
+                    winner: null,
+                    roomId: null,
+                    result: null
+                });
+            }
+        }
+        players.splice(1, 0, players.pop());
+    }
+
+    return matches;
+}
+
+function generateSingleEliminationMatches(participants) {
+    const nextPower = Math.pow(2, Math.ceil(Math.log2(participants.length)));
+    const slots = [...participants];
+    while (slots.length < nextPower) slots.push('BYE');
+
+    const matches = [];
+    let matchSeq = 1;
+    let roundPlayers = slots;
+    let round = 1;
+
+    while (roundPlayers.length >= 2) {
+        const current = [];
+        for (let i = 0; i < roundPlayers.length; i += 2) {
+            const p1 = roundPlayers[i];
+            const p2 = roundPlayers[i + 1];
+            current.push(`Winner M${matchSeq}`);
+            matches.push({
+                id: `m${matchSeq}`,
+                round,
+                label: `Round ${round} · Match ${i / 2 + 1}`,
+                p1,
+                p2,
+                bracketSide: 'main',
+                status: 'pending',
+                winner: null,
+                roomId: null,
+                result: null
+            });
+            matchSeq += 1;
+        }
+        roundPlayers = current;
+        round += 1;
+    }
+
+    return matches;
+}
+
+function generateDoubleEliminationMatches(participants) {
+    const winners = generateSingleEliminationMatches(participants);
+    const matches = [...winners];
+    let seq = winners.length + 1;
+    const extraLosersRounds = Math.max(1, Math.ceil(Math.log2(participants.length)));
+
+    for (let round = 1; round <= extraLosersRounds; round++) {
+        matches.push({
+            id: `m${seq++}`,
+            round,
+            label: `Losers Round ${round}`,
+            p1: `Loser Slot ${round}A`,
+            p2: `Loser Slot ${round}B`,
+            bracketSide: 'losers',
+            status: 'pending',
+            winner: null,
+            roomId: null,
+            result: null
+        });
+    }
+
+    matches.push({
+        id: `m${seq}`,
+        round: extraLosersRounds + 1,
+        label: 'Grand Final',
+        p1: 'Winners Bracket Champion',
+        p2: 'Losers Bracket Champion',
+        bracketSide: 'final',
+        status: 'pending',
+        winner: null,
+        roomId: null,
+        result: null
+    });
+
+    return matches;
+}
+
+function generateBracketMatches(type, participants) {
+    if (type === 'single-elimination') return generateSingleEliminationMatches(participants);
+    if (type === 'double-elimination') return generateDoubleEliminationMatches(participants);
+    return generateRoundRobinMatches(participants);
+}
+
+function canManageBracket(bracket, requesterHandle, adminPassword = '') {
+    const isOwner = requesterHandle && bracket.ownerHandle && requesterHandle === bracket.ownerHandle;
+    const isAdmin = isValidAdminPassword(adminPassword || '');
+    return isOwner || isAdmin;
+}
+
+async function resolveTieWinnerByRules(player1Handle, player2Handle) {
+    const response = await fetchJson(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(player1Handle)};${encodeURIComponent(player2Handle)}`);
+    if (response.status !== 'OK' || !Array.isArray(response.result) || response.result.length < 2) {
+        return player1Handle;
+    }
+
+    const p1 = response.result[0];
+    const p2 = response.result[1];
+
+    const p1Max = Number(p1.maxRating) || Number.MAX_SAFE_INTEGER;
+    const p2Max = Number(p2.maxRating) || Number.MAX_SAFE_INTEGER;
+    if (p1Max !== p2Max) return p1Max < p2Max ? player1Handle : player2Handle;
+
+    const p1Rating = Number(p1.rating) || Number.MAX_SAFE_INTEGER;
+    const p2Rating = Number(p2.rating) || Number.MAX_SAFE_INTEGER;
+    if (p1Rating !== p2Rating) return p1Rating < p2Rating ? player1Handle : player2Handle;
+
+    const p1Registered = Number(p1.registrationTimeSeconds) || 0;
+    const p2Registered = Number(p2.registrationTimeSeconds) || 0;
+    if (p1Registered !== p2Registered) return p1Registered > p2Registered ? player1Handle : player2Handle;
+
+    return player1Handle;
+}
+
+async function updateBracketMatchFromResult(resultPayload) {
+    const roomId = resultPayload?.roomId;
+    if (!roomId) return;
+
+    const brackets = await readBrackets();
+    let changed = false;
+
+    for (const bracket of brackets) {
+        if (!Array.isArray(bracket.matches)) continue;
+
+        for (const match of bracket.matches) {
+            if (match.roomId !== roomId || match.status === 'completed') continue;
+
+            const p1Handle = match.p1;
+            const p2Handle = match.p2;
+            const winnerRaw = resultPayload.winner;
+
+            let winnerHandle = winnerRaw;
+            if (winnerRaw === 'tie') {
+                winnerHandle = await resolveTieWinnerByRules(p1Handle, p2Handle);
+            }
+
+            match.status = 'completed';
+            match.winner = winnerHandle;
+            match.result = {
+                winnerOriginal: winnerRaw,
+                winnerResolved: winnerHandle,
+                player1Score: resultPayload?.player1?.score ?? null,
+                player2Score: resultPayload?.player2?.score ?? null,
+                finishedAt: resultPayload?.date || new Date().toISOString()
+            };
+
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        await writeBrackets(brackets);
+    }
 }
 
 // Generate random room ID
@@ -545,6 +756,83 @@ function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     if (leftHandle !== room.host) return false;
 
     return false;
+}
+
+async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [] }) {
+    const roomId = generateRoomId();
+    const validationProblem = null;
+    const normalizedProblems = Array.isArray(problems) && problems.length > 0
+        ? problems
+        : [
+            { points: 2, rating: 800 },
+            { points: 3, rating: 800 },
+            { points: 4, rating: 900 },
+            { points: 6, rating: 1000 },
+            { points: 8, rating: 1000 },
+            { points: 10, rating: 1100 },
+            { points: 12, rating: 1200 }
+        ];
+
+    const room = {
+        id: roomId,
+        name: roomName,
+        players: [
+            { handle: hostHandle, ws: null },
+            { handle: opponentHandle, ws: null }
+        ],
+        host: hostHandle,
+        opponentHandle,
+        duration,
+        interval,
+        problems: normalizedProblems,
+        validationProblem,
+        battleState: null,
+        createdAt: Date.now(),
+        endTimeout: null,
+        cleanupTimeout: null,
+        noOpponentTimeout: null,
+        countdownTimeout: null,
+        countdownEndsAt: null,
+        countdownInProgress: false,
+        preGeneratedFirstProblem: null,
+        pendingSubmissionActive: false,
+        validationCheckInProgress: false,
+        startInProgress: false,
+        breakAdvanceTimeout: null
+    };
+
+    rooms.set(roomId, room);
+
+    generateValidationProblem()
+        .then(problem => {
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom || currentRoom.battleState) return;
+
+            currentRoom.validationProblem = problem;
+            sendToRoom(currentRoom, {
+                type: 'VALIDATION_PROBLEM_READY',
+                roomId: currentRoom.id,
+                validationProblem: problem
+            });
+
+            evaluateRoomValidationAndAutoStart(currentRoom).catch(() => {});
+        })
+        .catch(error => {
+            console.error('Validation problem generation failed:', error);
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom) return;
+
+            broadcastValidationStatus(currentRoom, {
+                pair: [],
+                statuses: {},
+                message: 'Validation problem generation failed. Please create a new room.'
+            });
+        });
+
+    evaluateRoomValidationAndAutoStart(room).catch(() => {});
+    broadcastActiveRooms();
+
+    return room;
 }
 
 // Broadcast active rooms
@@ -1185,6 +1473,7 @@ app.post('/api/results', async (req, res) => {
         }
 
         await fs.writeFile(RESULTS_FILE, JSON.stringify(results, null, 2));
+        await updateBracketMatchFromResult(payload);
 
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
@@ -1230,7 +1519,144 @@ app.delete('/api/results', async (req, res) => {
     }
 });
 
-initResultsFile().then(() => {
+app.get('/api/brackets', async (req, res) => {
+    try {
+        const brackets = await readBrackets();
+        res.json(brackets);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/brackets', async (req, res) => {
+    try {
+        const body = req.body || {};
+        const ownerHandle = String(body.ownerHandle || '').trim();
+        const type = String(body.type || 'round-robin').trim();
+        const participants = normalizeParticipants(body.participants || []);
+
+        if (!ownerHandle) {
+            res.status(400).json({ error: 'ownerHandle is required' });
+            return;
+        }
+
+        if (participants.length < 2) {
+            res.status(400).json({ error: 'At least 2 participants required' });
+            return;
+        }
+
+        const supported = ['round-robin', 'single-elimination', 'double-elimination'];
+        if (!supported.includes(type)) {
+            res.status(400).json({ error: 'Unsupported tournament type' });
+            return;
+        }
+
+        const bracket = {
+            id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name: String(body.name || 'Tournament').trim() || 'Tournament',
+            type,
+            ownerHandle,
+            participants,
+            matches: generateBracketMatches(type, participants),
+            createdAt: new Date().toISOString()
+        };
+
+        const brackets = await readBrackets();
+        brackets.unshift(bracket);
+        await writeBrackets(brackets);
+
+        res.json(bracket);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/brackets/:bracketId', async (req, res) => {
+    try {
+        const { bracketId } = req.params;
+        const requesterHandle = String(req.query.requesterHandle || '').trim();
+        const adminPassword = extractAdminPassword(req);
+
+        const brackets = await readBrackets();
+        const target = brackets.find(item => item.id === bracketId);
+        if (!target) {
+            res.status(404).json({ error: 'Bracket not found' });
+            return;
+        }
+
+        if (!canManageBracket(target, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only bracket creator or admin can delete this bracket' });
+            return;
+        }
+
+        const next = brackets.filter(item => item.id !== bracketId);
+        await writeBrackets(next);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, res) => {
+    try {
+        const { bracketId, matchId } = req.params;
+        const body = req.body || {};
+        const requesterHandle = String(body.requesterHandle || '').trim();
+        const adminPassword = extractAdminPassword(req);
+
+        const brackets = await readBrackets();
+        const bracketIndex = brackets.findIndex(item => item.id === bracketId);
+        if (bracketIndex === -1) {
+            res.status(404).json({ error: 'Bracket not found' });
+            return;
+        }
+
+        const bracket = brackets[bracketIndex];
+        if (!canManageBracket(bracket, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only bracket creator or admin can create match rooms' });
+            return;
+        }
+
+        const match = (bracket.matches || []).find(item => item.id === matchId);
+        if (!match) {
+            res.status(404).json({ error: 'Match not found' });
+            return;
+        }
+
+        if (match.status === 'completed') {
+            res.status(400).json({ error: 'Match already completed' });
+            return;
+        }
+
+        if (!match.p1 || !match.p2 || /winner|loser|champion|slot/i.test(`${match.p1} ${match.p2}`)) {
+            res.status(400).json({ error: 'This match is not ready yet. Participants are placeholders.' });
+            return;
+        }
+
+        if (match.roomId && rooms.has(match.roomId)) {
+            res.json({ success: true, roomId: match.roomId, alreadyExists: true });
+            return;
+        }
+
+        const room = await createBracketRoom({
+            hostHandle: match.p1,
+            opponentHandle: match.p2,
+            roomName: `${bracket.name} · ${match.label} · ${match.p1} vs ${match.p2}`,
+            duration: Number(body.duration) || 40,
+            interval: Number(body.interval) || 1,
+            problems: Array.isArray(body.problems) ? body.problems : []
+        });
+
+        match.roomId = room.id;
+        await writeBrackets(brackets);
+
+        res.json({ success: true, roomId: room.id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+Promise.all([initResultsFile(), initBracketsFile()]).then(() => {
     setInterval(() => {
         rooms.forEach(room => {
             evaluateRoomValidationAndAutoStart(room).catch(() => {});
