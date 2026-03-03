@@ -48,7 +48,7 @@
         }));
     }
 
-    function renderBracketProblems() {
+    function renderBracketProblems(scrollToIndex = null) {
         if (!bracketProblemsList) return;
         const html = bracketProblems.map((problem, index) => {
             const ratingSelect = ratingOptions
@@ -94,6 +94,13 @@
                 renderBracketProblems();
             });
         });
+
+        if (Number.isInteger(scrollToIndex) && scrollToIndex >= 0) {
+            const target = bracketProblemsList.querySelector(`.create-problem-item[data-index="${scrollToIndex}"]`);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
     }
 
     function getBracketRoomConfigFromInputs() {
@@ -663,8 +670,13 @@
 
     if (bracketAddProblemBtn) {
         bracketAddProblemBtn.addEventListener('click', () => {
-            bracketProblems.push({ points: 2, rating: 1200 });
-            renderBracketProblems();
+            const lastPoints = bracketProblems.length > 0 ? Number(bracketProblems[bracketProblems.length - 1].points) || 0 : 0;
+            const lastRating = bracketProblems.length > 0 ? Number(bracketProblems[bracketProblems.length - 1].rating) || 800 : 800;
+            bracketProblems.push({
+                points: Math.max(1, lastPoints + 2),
+                rating: Math.min(3500, lastRating + 100)
+            });
+            renderBracketProblems(bracketProblems.length - 1);
         });
     }
 

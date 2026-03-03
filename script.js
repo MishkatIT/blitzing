@@ -158,7 +158,7 @@
     const WS_URL = window.location.origin.replace('http', 'ws');
 
     // Rating options
-    const ratingOptions = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600];
+    const ratingOptions = Array.from({ length: 28 }, (_, index) => 800 + (index * 100));
 
     function getUserHandleStorageKey() {
         return 'blitzUserHandle';
@@ -720,7 +720,7 @@
     }
 
     // Render problems in create room form
-    function renderCreateProblems() {
+    function renderCreateProblems(scrollToIndex = null) {
         let html = '';
         problems.forEach((prob, idx) => {
             let ratingOptionsHtml = '';
@@ -763,12 +763,21 @@
                 renderCreateProblems();
             });
         });
+
+        if (Number.isInteger(scrollToIndex) && scrollToIndex >= 0) {
+            const target = createProblemsList.querySelector(`.create-problem-item[data-index="${scrollToIndex}"]`);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
     }
 
     // Add problem in create form
     createAddProblemBtn.addEventListener('click', () => {
-        problems.push({ points: 2, rating: 1200 });
-        renderCreateProblems();
+        const lastPoints = problems.length > 0 ? Number(problems[problems.length - 1].points) || 0 : 0;
+        const lastRating = problems.length > 0 ? Number(problems[problems.length - 1].rating) || 800 : 800;
+        problems.push({ points: Math.max(1, lastPoints + 2), rating: Math.min(3500, lastRating + 100) });
+        renderCreateProblems(problems.length - 1);
     });
 
     function setValidationProblem(problem, players = []) {
@@ -889,8 +898,20 @@
             alert('Please set your handle first');
             return;
         }
-        joinRoomIdInput.value = roomId;
-        joinRoomBtn.focus();
+
+        const normalizedRoomId = String(roomId || '').trim().toUpperCase();
+        joinRoomIdInput.value = normalizedRoomId;
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert('Connection not ready. Please wait a moment and try again.');
+            return;
+        }
+
+        ws.send(JSON.stringify({
+            type: 'JOIN_ROOM',
+            roomId: normalizedRoomId,
+            handle: userHandle
+        }));
     };
 
     function stopHandleVerificationPolling() {

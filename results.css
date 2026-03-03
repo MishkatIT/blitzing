@@ -204,7 +204,7 @@ body {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(5, 7, 11, 0.74);
+    background: rgba(4, 6, 10, 0.9);
     z-index: 2000;
     justify-content: center;
     align-items: center;
@@ -215,6 +215,8 @@ body {
 .password-content {
     width: min(760px, 100%);
     padding: 18px;
+    background: #101724;
+    border: 1px solid #2b364a;
 }
 
 .modal-content h2,
