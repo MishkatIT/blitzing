@@ -1,5 +1,6 @@
 (function() {
     // State
+    const ADMIN_HANDLES = new Set(['else_if_tridib21', 'mishkatit']);
     let userHandle = '';
     let playersValidated = false;
     let currentRoom = null;
@@ -58,6 +59,7 @@
     let serverClockOffsetMs = 0;
     let leaderboardTieOrder = Math.random() < 0.5 ? ['p1', 'p2'] : ['p2', 'p1'];
     let syncedActiveHandle = '';
+    let pendingPostLoginReturnTo = '';
 
     
     // Track solved problems
@@ -78,6 +80,47 @@
         p1: [],
         p2: []
     };
+
+    function createEmptyProblemResult() {
+        return {
+            attempts: 0,
+            solved: false,
+            pending: false,
+            solvedAtSec: null
+        };
+    }
+
+    function normalizeProblemResultEntry(entry) {
+        const source = entry && typeof entry === 'object' ? entry : {};
+        const attempts = Math.max(0, Number(source.attempts) || 0);
+        const solved = !!source.solved;
+        const pending = !!source.pending && !solved;
+        const solvedAtSecRaw = Number(source.solvedAtSec);
+        const solvedAtSec = Number.isFinite(solvedAtSecRaw) && solvedAtSecRaw >= 0
+            ? Math.floor(solvedAtSecRaw)
+            : null;
+
+        return {
+            attempts,
+            solved,
+            pending,
+            solvedAtSec
+        };
+    }
+
+    function getProblemResultFor(playerKey, index) {
+        if (!problemResults[playerKey]) {
+            problemResults[playerKey] = [];
+        }
+
+        if (!problemResults[playerKey][index]) {
+            problemResults[playerKey][index] = createEmptyProblemResult();
+        } else {
+            problemResults[playerKey][index] = normalizeProblemResultEntry(problemResults[playerKey][index]);
+        }
+
+        return problemResults[playerKey][index];
+    }
 
     // DOM elements
     const userHandleInput = document.getElementById('userHandleInput');
@@ -215,8 +258,10 @@
             loggedInfo.removeAttribute('role');
             loggedInfo.removeAttribute('tabindex');
             loggedInfo.removeAttribute('title');
-            loggedInfo.textContent = 'Not verified';
+            loggedInfo.textContent = '';
+            loggedInfo.style.display = 'none';
             if (setHandleBtn) setHandleBtn.style.display = 'inline-flex';
+            syncAdminOnlyUiVisibility();
             return;
         }
 
@@ -229,9 +274,17 @@
         loggedInfo.setAttribute('tabindex', '0');
         loggedInfo.setAttribute('title', 'Click to view profile');
         loggedInfo.innerHTML = `${avatarMarkup}<span>${userHandle}</span>`;
+        loggedInfo.style.display = 'inline-flex';
         if (setHandleBtn) setHandleBtn.style.display = 'none';
 
+        syncAdminOnlyUiVisibility();
+
         syncActiveHandlePresence();
+    }
+
+    function syncAdminOnlyUiVisibility() {
+        if (!cancelGameBtn) return;
+        cancelGameBtn.style.display = isAdminHandle(userHandle) ? 'inline-flex' : 'none';
     }
 
     function syncActiveHandlePresence(force = false) {
@@ -661,6 +714,10 @@
         clearBattleRuntimeState();
     }
 
+    function isAdminHandle(handle) {
+        return ADMIN_HANDLES.has(String(handle || '').trim().toLowerCase());
+    }
+
     // Reconnect to room
     function reconnectToRoom() {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -964,8 +1021,8 @@
         breakStartTime = null;
         timeLeftSec = Math.max(0, Math.floor((battleEndsAt - getSyncedNow()) / 1000));
         problemResults = {
-            p1: problems.map(() => ({ attempts: 0, solved: false, pending: false })),
-            p2: problems.map(() => ({ attempts: 0, solved: false, pending: false }))
+            p1: problems.map(() => createEmptyProblemResult()),
+            p2: problems.map(() => createEmptyProblemResult())
         };
 
         const problemWinners = state.problemWinners || {};
@@ -976,10 +1033,10 @@
 
             const problemIndex = problemNumber - 1;
             if (!problemResults.p1[problemIndex]) {
-                problemResults.p1[problemIndex] = { attempts: 0, solved: false, pending: false };
+                problemResults.p1[problemIndex] = createEmptyProblemResult();
             }
             if (!problemResults.p2[problemIndex]) {
-                problemResults.p2[problemIndex] = { attempts: 0, solved: false, pending: false };
+                problemResults.p2[problemIndex] = createEmptyProblemResult();
             }
 
             const problemPoints = problems[problemNumber - 1]?.points || selectedProblems[problemNumber - 1]?.points || 0;
@@ -987,11 +1044,17 @@
                 player1Score += problemPoints;
                 problemResults.p1[problemIndex].solved = true;
                 problemResults.p1[problemIndex].pending = false;
+                if (!Number.isFinite(Number(problemResults.p1[problemIndex].solvedAtSec))) {
+                    problemResults.p1[problemIndex].solvedAtSec = null;
+                }
                 p1SolvedProblems.add(String(problemNumber));
             } else if (winnerHandle === player2Handle) {
                 player2Score += problemPoints;
                 problemResults.p2[problemIndex].solved = true;
                 problemResults.p2[problemIndex].pending = false;
+                if (!Number.isFinite(Number(problemResults.p2[problemIndex].solvedAtSec))) {
+                    problemResults.p2[problemIndex].solvedAtSec = null;
+                }
                 p2SolvedProblems.add(String(problemNumber));
             }
         });
@@ -1224,6 +1287,51 @@
         renderLiveSpectatorList(list);
     }
 
+    function captureSpectatorChipRects() {
+        if (!spectatorList) return new Map();
+
+        const rects = new Map();
+        const chips = Array.from(spectatorList.querySelectorAll('.spectator-chip'));
+        chips.forEach(chip => {
+            if (chip.classList.contains('is-leaving')) return;
+            const key = String(chip.dataset.handle || '').toLowerCase();
+            if (!key) return;
+            rects.set(key, chip.getBoundingClientRect());
+        });
+
+        return rects;
+    }
+
+    function animateSpectatorChipReflow(previousRects) {
+        if (!spectatorList || !previousRects || previousRects.size === 0) return;
+
+        const chips = Array.from(spectatorList.querySelectorAll('.spectator-chip'));
+        chips.forEach(chip => {
+            if (chip.classList.contains('is-leaving') || chip.classList.contains('is-entering')) return;
+
+            const key = String(chip.dataset.handle || '').toLowerCase();
+            const previousRect = previousRects.get(key);
+            if (!previousRect) return;
+
+            const nextRect = chip.getBoundingClientRect();
+            const dx = previousRect.left - nextRect.left;
+            const dy = previousRect.top - nextRect.top;
+
+            if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+
+            chip.animate(
+                [
+                    { transform: `translate(${dx}px, ${dy}px)` },
+                    { transform: 'translate(0, 0)' }
+                ],
+                {
+                    duration: 220,
+                    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+                }
+            );
+        });
+    }
+
     function renderLiveSpectatorList(players = []) {
         if (!spectatorPanel || !spectatorCountText || !spectatorList) return;
 
@@ -1242,12 +1350,87 @@
             return normalized !== p1 && normalized !== p2;
         });
 
+        const previousRects = captureSpectatorChipRects();
+
         spectatorCountText.textContent = `${spectators.length} live`;
-        if (spectators.length === 0) {
-            spectatorList.innerHTML = '<span class="spectator-empty">No live spectators</span>';
-        } else {
-            spectatorList.innerHTML = spectators.map(handle => `<span class="spectator-chip">${handle}</span>`).join('');
+
+        const desiredSpectators = spectators.map(handle => ({
+            key: handle.toLowerCase(),
+            label: handle
+        }));
+        const desiredKeys = new Set(desiredSpectators.map(item => item.key));
+
+        const emptyState = spectatorList.querySelector('.spectator-empty');
+        if (emptyState) {
+            emptyState.remove();
         }
+
+        const existingChips = Array.from(spectatorList.querySelectorAll('.spectator-chip'));
+        const existingByKey = new Map();
+        existingChips.forEach(chip => {
+            const key = String(chip.dataset.handle || '').toLowerCase();
+            if (key) {
+                existingByKey.set(key, chip);
+            }
+        });
+
+        const ensureEmptyState = () => {
+            if (spectators.length !== 0) return;
+            const remainingChips = spectatorList.querySelectorAll('.spectator-chip').length;
+            if (remainingChips > 0) return;
+            if (!spectatorList.querySelector('.spectator-empty')) {
+                const empty = document.createElement('span');
+                empty.className = 'spectator-empty';
+                empty.textContent = 'No live spectators';
+                spectatorList.appendChild(empty);
+            }
+        };
+
+        existingChips.forEach(chip => {
+            const key = String(chip.dataset.handle || '').toLowerCase();
+            if (!key || desiredKeys.has(key) || chip.classList.contains('is-leaving')) return;
+
+            chip.classList.add('is-leaving');
+            const removeChip = () => {
+                chip.removeEventListener('transitionend', removeChip);
+                const beforeRemovalRects = captureSpectatorChipRects();
+                if (chip.isConnected) {
+                    chip.remove();
+                }
+                requestAnimationFrame(() => {
+                    animateSpectatorChipReflow(beforeRemovalRects);
+                });
+                ensureEmptyState();
+            };
+
+            chip.addEventListener('transitionend', removeChip);
+            setTimeout(removeChip, 260);
+        });
+
+        desiredSpectators.forEach(({ key, label }) => {
+            const existing = existingByKey.get(key);
+            if (existing) {
+                existing.textContent = label;
+                existing.classList.remove('is-leaving');
+                spectatorList.appendChild(existing);
+                return;
+            }
+
+            const chip = document.createElement('span');
+            chip.className = 'spectator-chip is-entering';
+            chip.dataset.handle = key;
+            chip.textContent = label;
+            spectatorList.appendChild(chip);
+
+            requestAnimationFrame(() => {
+                chip.classList.remove('is-entering');
+            });
+        });
+
+        ensureEmptyState();
+        requestAnimationFrame(() => {
+            animateSpectatorChipReflow(previousRects);
+        });
 
         spectatorPanel.style.display = 'block';
     }
@@ -1290,7 +1473,7 @@
 
     window.joinRoom = function(roomId) {
         if (!userHandle) {
-            alert('Please set your handle first');
+            alert('Please login first');
             return;
         }
 
@@ -1337,11 +1520,27 @@
         userAvatarUrl = profile.avatar || '';
         playersValidated = true;
         userHandleInput.value = profile.handle;
+
+        try {
+            await fetch(`${API_BASE_URL}/api/profiles`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ handle: profile.handle })
+            });
+        } catch {
+        }
+
         renderLoggedInfo();
         await ensureNotificationPermission();
         saveState();
         closeHandleSetupModal();
         showDesktopNotification('✅ Handle Verified', `${profile.handle} verified successfully`);
+
+        if (pendingPostLoginReturnTo) {
+            const target = pendingPostLoginReturnTo;
+            pendingPostLoginReturnTo = '';
+            window.location.href = target;
+        }
     }
 
     async function verifyHandleCompilationErrorNow() {
@@ -1461,7 +1660,7 @@
         await ensureNotificationPermission();
 
         if (!userHandle) {
-            alert('Please set your handle first');
+            alert('Please login first');
             return;
         }
 
@@ -1500,7 +1699,7 @@
         ensureNotificationPermission().catch(() => {});
 
         if (!userHandle) {
-            alert('Please set your handle first');
+            alert('Please login first');
             return;
         }
 
@@ -1809,15 +2008,19 @@
         row += `<td><strong style="color: #ffd966;">${player.score}</strong></td>`;
 
         problems.forEach((_, index) => {
-            const result = player.results[index];
-            if (result && result.solved) {
-                row += `<td class="problem-cell solved">✓</td>`;
-            } else if (result && result.pending) {
-                row += `<td class="problem-cell">⏳</td>`;
-            } else if (result && result.attempts > 0) {
-                row += `<td class="problem-cell attempted">✗</td>`;
+            const result = normalizeProblemResultEntry(player.results[index] || createEmptyProblemResult());
+            if (result.solved) {
+                const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
+                const solveTimeHtml = Number.isFinite(Number(result.solvedAtSec))
+                    ? `<div class="problem-cell-sub">${formatTime(result.solvedAtSec)}</div>`
+                    : '';
+                row += `<td class="problem-cell status-ac"><div class="problem-cell-main">${acLabel}</div>${solveTimeHtml}</td>`;
+            } else if (result.pending) {
+                row += `<td class="problem-cell status-pending"><div class="problem-cell-main pending-main">?<span class="pending-loader" aria-hidden="true"></span></div></td>`;
+            } else if (result.attempts > 0) {
+                row += `<td class="problem-cell status-wa"><div class="problem-cell-main">-${result.attempts}</div></td>`;
             } else {
-                row += `<td class="problem-cell">—</td>`;
+                row += `<td class="problem-cell status-none"><div class="problem-cell-main">—</div></td>`;
             }
         });
 
@@ -2047,13 +2250,15 @@
         const analysis = {
             accepted: null,
             hasPending: false,
-            hasJudgedFail: false
+            hasJudgedFail: false,
+            judgedFailCount: 0
         };
 
         if (!submissionData || submissionData.status !== 'OK' || !Array.isArray(submissionData.result) || !problem) {
             return analysis;
         }
 
+        const relevantSubs = [];
         for (const sub of submissionData.result) {
             if (!sub.problem) continue;
             const isSameProblem = sub.problem.contestId === problem.contestId && sub.problem.index === problem.index;
@@ -2063,19 +2268,44 @@
             if (deadlineMs && submitMs && submitMs > deadlineMs) continue;
             if (minMs && submitMs && submitMs < minMs) continue;
 
+            relevantSubs.push({
+                submitMs,
+                submissionId: sub.id,
+                verdict: sub.verdict
+            });
+        }
+
+        for (const sub of relevantSubs) {
             if (sub.verdict === 'OK') {
-                if (!analysis.accepted || submitMs < analysis.accepted.submitMs) {
-                    analysis.accepted = { submitMs, submissionId: sub.id };
+                if (!analysis.accepted || sub.submitMs < analysis.accepted.submitMs) {
+                    analysis.accepted = { submitMs: sub.submitMs, submissionId: sub.submissionId };
                 }
+            }
+        }
+
+        const acceptedMs = analysis.accepted?.submitMs || null;
+        let failCount = 0;
+        let hasPending = false;
+
+        for (const sub of relevantSubs) {
+            if (acceptedMs && sub.submitMs >= acceptedMs) {
+                continue;
+            }
+
+            if (sub.verdict === 'OK') {
                 continue;
             }
 
             if (isPendingVerdict(sub.verdict)) {
-                analysis.hasPending = true;
+                hasPending = true;
             } else {
-                analysis.hasJudgedFail = true;
+                failCount += 1;
             }
         }
+
+        analysis.judgedFailCount = failCount;
+        analysis.hasJudgedFail = failCount > 0;
+        analysis.hasPending = hasPending;
 
         return analysis;
     }
@@ -2122,11 +2352,16 @@
                 if (p1Accepted || p2Accepted) {
                     reportPendingSubmissionStatus(false);
                     let solver = 'p1';
+                    let solverSubmitMs = p1Accepted?.submitMs || null;
                     if (!p1Accepted) solver = 'p2';
                     else if (p2Accepted && p2Accepted.submitMs < p1Accepted.submitMs) solver = 'p2';
 
+                    if (solver === 'p2') {
+                        solverSubmitMs = p2Accepted?.submitMs || null;
+                    }
+
                     endAfterCurrentSolve = true;
-                    handleSolve(solver);
+                    handleSolve(solver, solverSubmitMs);
                     return;
                 }
 
@@ -2219,32 +2454,22 @@
             const p1Data = await p1Response.json();
             const p2Data = await p2Response.json();
 
-            if (!problemResults.p1[currentProblemIndex - 1]) {
-                problemResults.p1[currentProblemIndex - 1] = { attempts: 0, solved: false, pending: false };
-            }
-            if (!problemResults.p2[currentProblemIndex - 1]) {
-                problemResults.p2[currentProblemIndex - 1] = { attempts: 0, solved: false, pending: false };
-            }
+            const problemIndex = currentProblemIndex - 1;
+            const p1Result = getProblemResultFor('p1', problemIndex);
+            const p2Result = getProblemResultFor('p2', problemIndex);
 
             const windowStartMs = getSubmissionWindowStartMs();
             const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, null, windowStartMs);
             const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, null, windowStartMs);
 
-            const p1Result = problemResults.p1[currentProblemIndex - 1];
-            const p2Result = problemResults.p2[currentProblemIndex - 1];
-
             if (!p1Result.solved) {
-                p1Result.pending = !!p1Analysis.hasPending;
-                if (p1Analysis.hasJudgedFail) {
-                    p1Result.attempts = Math.max(1, p1Result.attempts || 0);
-                }
+                p1Result.pending = !!p1Analysis.hasPending && !p1Analysis.accepted;
+                p1Result.attempts = Math.max(0, Number(p1Analysis.judgedFailCount) || 0);
             }
 
             if (!p2Result.solved) {
-                p2Result.pending = !!p2Analysis.hasPending;
-                if (p2Analysis.hasJudgedFail) {
-                    p2Result.attempts = Math.max(1, p2Result.attempts || 0);
-                }
+                p2Result.pending = !!p2Analysis.hasPending && !p2Analysis.accepted;
+                p2Result.attempts = Math.max(0, Number(p2Analysis.judgedFailCount) || 0);
             }
 
             const p1Accepted = p1Analysis.accepted;
@@ -2252,9 +2477,9 @@
 
             if (p1Accepted || p2Accepted) {
                 if (!p2Accepted || (p1Accepted && p1Accepted.submitMs <= p2Accepted.submitMs)) {
-                    handleSolve('p1');
+                    handleSolve('p1', p1Accepted?.submitMs || null);
                 } else {
-                    handleSolve('p2');
+                    handleSolve('p2', p2Accepted?.submitMs || null);
                 }
             }
 
@@ -2265,22 +2490,38 @@
         }
     }
 
-    function handleSolve(player) {
+    function handleSolve(player, solveSubmitMs = null) {
         if (problemLocked || !battleActive) return;
         
         problemLocked = true;
         const problemPoints = problems[currentProblemIndex - 1]?.points || selectedProblems[currentProblemIndex - 1]?.points || 500;
         
+        const solvedAtSec = Number.isFinite(Number(solveSubmitMs)) && Number.isFinite(Number(battleStartTime))
+            ? Math.max(0, Math.floor((Number(solveSubmitMs) - Number(battleStartTime)) / 1000))
+            : (Number.isFinite(Number(getSyncedNow())) && Number.isFinite(Number(battleStartTime))
+                ? Math.max(0, Math.floor((Number(getSyncedNow()) - Number(battleStartTime)) / 1000))
+                : null);
+
         if (player === 'p1') {
             player1Score += problemPoints;
-            problemResults.p1[currentProblemIndex - 1].solved = true;
+            const p1Result = getProblemResultFor('p1', currentProblemIndex - 1);
+            p1Result.solved = true;
+            p1Result.pending = false;
+            if (Number.isFinite(Number(solvedAtSec))) {
+                p1Result.solvedAtSec = solvedAtSec;
+            }
             p1Row.classList.add('solved');
             if (currentProblem) {
                 p1SolvedProblems.add(currentProblem.id);
             }
         } else {
             player2Score += problemPoints;
-            problemResults.p2[currentProblemIndex - 1].solved = true;
+            const p2Result = getProblemResultFor('p2', currentProblemIndex - 1);
+            p2Result.solved = true;
+            p2Result.pending = false;
+            if (Number.isFinite(Number(solvedAtSec))) {
+                p2Result.solvedAtSec = solvedAtSec;
+            }
             p2Row.classList.add('solved');
             if (currentProblem) {
                 p2SolvedProblems.add(currentProblem.id);
@@ -2405,8 +2646,8 @@
                 index: generatedProblem?.index || '',
                 points: configProblem?.points || generatedProblem?.points || 0,
                 rating: configProblem?.rating || generatedProblem?.rating || null,
-                p1Result: problemResults.p1[idx] || { attempts: 0, solved: false, pending: false },
-                p2Result: problemResults.p2[idx] || { attempts: 0, solved: false, pending: false }
+                p1Result: normalizeProblemResultEntry(problemResults.p1[idx] || createEmptyProblemResult()),
+                p2Result: normalizeProblemResultEntry(problemResults.p2[idx] || createEmptyProblemResult())
             };
             })
         };
@@ -2474,7 +2715,11 @@
             await submitBattleResult(winner);
         }
 
-        matchStatusText.textContent = fromServer ? '✅ Blitz ended' : '✅ Blitz ended';
+        const finalScoreText = `${player1Handle}: ${player1Score} · ${player2Handle}: ${player2Score}`;
+        const resultText = winner === 'tie'
+            ? `Tie` 
+            : `Winner: ${winner}`;
+        matchStatusText.textContent = `✅ Blitz ended · ${resultText} · ${finalScoreText}`;
         
         if (winner !== 'tie') {
             winnerHandleSpan.textContent = winner;
@@ -2497,6 +2742,12 @@
             alert('No active game to cancel');
             return;
         }
+
+        if (!isAdminHandle(userHandle)) {
+            alert('Only admin can cancel game.');
+            return;
+        }
+
         passwordModal.style.display = 'flex';
         passwordInput.value = '';
         passwordInput.focus();
@@ -2506,7 +2757,7 @@
         const enteredPassword = passwordInput.value;
 
         if (!enteredPassword) {
-            alert('Please enter admin password');
+            alert('Please enter admin PIN');
             passwordInput.focus();
             return;
         }
@@ -2518,11 +2769,11 @@
                     'Content-Type': 'application/json',
                     'x-admin-password': enteredPassword
                 },
-                body: JSON.stringify({ password: enteredPassword })
+                body: JSON.stringify({ password: enteredPassword, requesterHandle: userHandle })
             });
 
             if (!response.ok) {
-                alert('Incorrect password!');
+                alert('Incorrect admin PIN!');
                 passwordInput.value = '';
                 passwordInput.focus();
                 return;
@@ -2533,7 +2784,7 @@
             showDesktopNotification('⛔ Game Cancelled', 'Game cancelled by administrator', true);
         } catch (error) {
             console.error('Admin verification failed:', error);
-            alert('Could not verify admin password right now');
+            alert('Could not verify admin PIN right now');
         }
     });
 
@@ -2557,6 +2808,40 @@
         }
     });
 
+    function hasDirectLoginIntent() {
+        const params = new URLSearchParams(window.location.search || '');
+        const loginFlag = String(params.get('login') || '').toLowerCase();
+        const hash = String(window.location.hash || '').replace('#', '').toLowerCase();
+        return loginFlag === '1' || loginFlag === 'true' || hash === 'login';
+    }
+
+    function getPostLoginReturnTarget() {
+        const params = new URLSearchParams(window.location.search || '');
+        const raw = String(params.get('returnTo') || '').trim();
+        if (!raw) return '';
+
+        try {
+            const decoded = decodeURIComponent(raw);
+            if (!decoded.startsWith('/')) return '';
+            if (decoded.startsWith('//')) return '';
+            if (decoded.startsWith('/index.html') || decoded === '/') return '';
+            return decoded;
+        } catch {
+            return '';
+        }
+    }
+
+    function clearDirectLoginIntentFromUrl() {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('login')) {
+            url.searchParams.delete('login');
+        }
+        if (url.hash === '#login') {
+            url.hash = '';
+        }
+        window.history.replaceState({}, '', url.toString());
+    }
+
     function init() {
         if (typeof Notification !== 'undefined') {
             notificationPermission = Notification.permission === 'granted';
@@ -2570,6 +2855,14 @@
             }
         }
         loadSavedState();
+
+        pendingPostLoginReturnTo = getPostLoginReturnTarget();
+
+        if (!userHandle && hasDirectLoginIntent()) {
+            openHandleSetupModal();
+            clearDirectLoginIntentFromUrl();
+        }
+
         bindArenaPlayerProfileLinks();
         connectWebSocket();
     }

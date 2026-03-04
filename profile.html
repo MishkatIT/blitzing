@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PUC Blitz Cup · Profile</title>
     <link rel="stylesheet" href="profile.css">
+    <link rel="stylesheet" href="floating-scrollbar.css">
 </head>
 <body>
     <div class="container">
@@ -17,15 +18,16 @@
             <a href="profile.html" class="quick-nav-btn">Profile</a>
             <a href="leaderboard.html" class="quick-nav-btn">Global Leaderboard</a>
             <a href="results.html" class="quick-nav-btn">Results</a>
+            <a href="feedback.html" class="quick-nav-btn">Feedback</a>
+            <div class="quick-nav-account">
+                <a href="index.html?login=1" class="global-handle-chip not-verified" data-global-handle-chip>Login</a>
+            </div>
         </div>
 
         <header class="blitz-header">
             <div>
                 <h1>Site Profile</h1>
                 <p class="subtitle">Player profile and local blitz statistics</p>
-            </div>
-            <div class="user-panel">
-                <a href="index.html" class="global-handle-chip not-verified" data-global-handle-chip>Not verified</a>
             </div>
         </header>
 
@@ -54,6 +56,7 @@
 
         <footer class="site-footer">
             <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
+            <p class="site-version">v2.1</p>
             <p>
                 Developers:
                 <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,
@@ -64,6 +67,8 @@
 
     <script src="global-profile-presence.js"></script>
     <script src="profile-presence-utils.js"></script>
+    <script src="quick-nav-overflow.js"></script>
+    <script src="floating-scrollbar.js"></script>
     <script src="profile.js"></script>
     <script src="search-suggestions.js"></script>
 </body>

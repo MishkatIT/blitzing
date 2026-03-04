@@ -36,10 +36,26 @@ body {
 }
 
 .quick-nav {
+    position: sticky;
+    top: 10px;
+    z-index: 120;
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(18, 23, 32, 0.86), rgba(18, 23, 32, 0.68));
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
     margin-bottom: 18px;
+}
+
+.quick-nav-account {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .quick-nav-btn {
@@ -64,20 +80,47 @@ body {
 
 .blitz-header {
     padding: 18px;
-    margin-bottom: 14px;
+    margin-bottom: 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
 }
 
 h1 {
-    font-size: 1.8rem;
+    font-size: 1.9rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
 }
 
-.subtitle,
+.logo h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.logo span {
+    display: inline-flex;
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+}
+
 .note {
     color: var(--muted);
+}
+
+.subtitle {
+    display: inline-flex;
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
 }
 
 .panel {
@@ -87,7 +130,7 @@ h1 {
 
 .user-panel {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
@@ -108,8 +151,21 @@ h1 {
 }
 
 .global-handle-chip.not-verified {
-    color: var(--muted);
-    font-weight: 500;
+    display: inline-block;
+    background: linear-gradient(180deg, #79afff, #5a94ef);
+    color: #081223;
+    border-color: #6ea8fe;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.3333px;
+    line-height: normal;
+    transition: 0.2s ease;
+}
+
+.global-handle-chip.not-verified:hover {
+    transform: translateY(-1px);
+    border-color: #3b4660;
 }
 
 .global-handle-avatar {
@@ -226,6 +282,13 @@ tbody tr:hover {
 .site-footer a {
     color: #9dc4ff;
     text-decoration: none;
+}
+
+.site-version {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    opacity: 0.78;
+    letter-spacing: 0.03em;
 }
 
 @media (max-width: 860px) {

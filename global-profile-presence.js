@@ -25,11 +25,13 @@
         chips.forEach((chip) => {
             if (!handle) {
                 chip.classList.add('not-verified');
-                chip.textContent = 'Not verified';
-                chip.setAttribute('href', 'index.html');
+                chip.textContent = 'Login';
+                const currentPath = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
+                const returnTo = encodeURIComponent(currentPath || '/');
+                chip.setAttribute('href', `index.html?login=1&returnTo=${returnTo}`);
                 chip.removeAttribute('target');
                 chip.removeAttribute('rel');
-                chip.setAttribute('title', 'Set handle in Arena');
+                chip.setAttribute('title', 'Login in Arena');
                 return;
             }
 

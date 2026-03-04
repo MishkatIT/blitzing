@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PUC Blitz Cup · Room Battle</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="floating-scrollbar.css">
 </head>
 <body>
 <div class="cup-container">
@@ -17,16 +18,17 @@
         <a href="profile.html" class="quick-nav-btn">Profile</a>
         <a href="leaderboard.html" class="quick-nav-btn">Global Leaderboard</a>
         <a href="results.html" class="quick-nav-btn">Results</a>
+        <a href="feedback.html" class="quick-nav-btn">Feedback</a>
+        <div class="quick-nav-account">
+            <button id="setHandleBtn">Login</button>
+            <div id="loggedInfo" class="logged-info" style="display:none;"></div>
+        </div>
     </div>
 
     <header class="blitz-header">
         <div class="logo">
             <h1>PUC Blitz Cup</h1>
             <span>Realtime Room Battle</span>
-        </div>
-        <div class="user-panel">
-            <button id="setHandleBtn">Set Handle</button>
-            <div id="loggedInfo" class="logged-info">Not verified</div>
         </div>
     </header>
 
@@ -209,7 +211,7 @@
 <div class="password-modal" id="passwordModal">
     <div class="password-content">
         <h2>Cancel Game</h2>
-        <p>Enter admin password to cancel:</p>
+        <p>Enter admin PIN to cancel:</p>
         <input type="password" class="password-input" id="passwordInput" placeholder="Enter password">
         <div class="password-buttons">
             <button class="password-btn confirm-btn" id="confirmCancel">Confirm</button>
@@ -269,6 +271,7 @@
 
 <footer class="site-footer">
     <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
+    <p class="site-version">v2.1</p>
     <p>
         Developers:
         <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,
@@ -278,6 +281,8 @@
 
 <script src="profile-presence-utils.js"></script>
 <script src="global-profile-presence.js"></script>
+<script src="quick-nav-overflow.js"></script>
+<script src="floating-scrollbar.js"></script>
 <script src="script.js"></script>
 <script src="search-suggestions.js"></script>
 </body>

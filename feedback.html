@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PUC Blitz Cup · Head-to-Head</title>
-    <link rel="stylesheet" href="headtohead.css">
+    <title>PUC Blitz Cup · Feedback</title>
+    <link rel="stylesheet" href="feedback.css">
     <link rel="stylesheet" href="floating-scrollbar.css">
 </head>
 <body>
@@ -26,47 +26,40 @@
 
         <header class="blitz-header">
             <div>
-                <h1>Head-to-Head</h1>
-                <p class="subtitle">Compare two handles from Blitz history</p>
+                <h1>Feedback Board</h1>
+                <p class="subtitle">Share issues and ideas · Track status as Open / Fixed / Ignored</p>
             </div>
         </header>
 
+        <section class="panel feedback-create-panel">
+            <h2>Submit Feedback</h2>
+            <div class="feedback-form-grid">
+                <input id="feedbackTitleInput" type="text" placeholder="Short title (optional)">
+                <textarea id="feedbackMessageInput" placeholder="Describe your feedback..." rows="4"></textarea>
+                <button id="submitFeedbackBtn" class="primary-btn">Post Feedback</button>
+            </div>
+            <p class="note">Only the feedback author or admin can edit/delete their entries.</p>
+        </section>
+
         <section class="panel">
-            <div class="form-grid">
-                <div>
-                    <label for="handleOneInput">Handle 1</label>
-                    <input id="handleOneInput" type="text" placeholder="tourist">
-                </div>
-                <div>
-                    <label for="handleTwoInput">Handle 2</label>
-                    <input id="handleTwoInput" type="text" placeholder="Benq">
+            <div class="feedback-toolbar">
+                <h2>All Feedback</h2>
+                <div class="feedback-toolbar-controls">
+                    <input id="feedbackSearchInput" type="text" placeholder="Search by handle or text...">
+                    <select id="feedbackStatusFilter">
+                        <option value="all">All</option>
+                        <option value="open">Open</option>
+                        <option value="fixed">Fixed</option>
+                        <option value="ignored">Ignored</option>
+                    </select>
                 </div>
             </div>
-            <button id="compareBtn" class="primary-btn">Compare</button>
-            <p class="note" id="compareNote"></p>
+            <div id="feedbackList" class="feedback-list"></div>
         </section>
 
-        <section class="panel" id="summaryPanel" style="display:none;">
-            <h2 id="summaryTitle">Summary</h2>
-            <div class="stats-grid" id="statsGrid"></div>
-        </section>
-
-        <section class="panel" id="matchesPanel" style="display:none;">
-            <h2>Recent Meetings</h2>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Room</th>
-                            <th>Winner</th>
-                            <th>Score</th>
-                            <th>History</th>
-                        </tr>
-                    </thead>
-                    <tbody id="matchesBody"></tbody>
-                </table>
-            </div>
+        <section class="panel">
+            <h2>Activity Log</h2>
+            <div id="feedbackActivity" class="activity-list"></div>
         </section>
 
         <footer class="site-footer">
@@ -83,7 +76,7 @@
     <script src="global-profile-presence.js"></script>
     <script src="quick-nav-overflow.js"></script>
     <script src="floating-scrollbar.js"></script>
-    <script src="headtohead.js"></script>
+    <script src="feedback.js"></script>
     <script src="search-suggestions.js"></script>
 </body>
 </html>

@@ -35,10 +35,26 @@ body {
 }
 
 .quick-nav {
+    position: sticky;
+    top: 10px;
+    z-index: 120;
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(18, 23, 32, 0.86), rgba(18, 23, 32, 0.68));
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
     margin-bottom: 18px;
+}
+
+.quick-nav-account {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .quick-nav-btn {
@@ -59,6 +75,11 @@ body {
     border-color: #3a4b67;
     color: var(--text);
     background: rgba(110, 168, 254, 0.08);
+}
+
+.quick-nav-account .logged-info,
+.quick-nav-account #setHandleBtn {
+    white-space: nowrap;
 }
 
 .blitz-header,
@@ -783,6 +804,21 @@ button:hover,
     color: #9dc4ff;
     font-size: 0.84rem;
     font-weight: 600;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    will-change: opacity, transform;
+}
+
+.spectator-chip.is-entering {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+}
+
+.spectator-chip.is-leaving {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.92);
+    pointer-events: none;
 }
 
 .spectator-empty {
@@ -899,16 +935,58 @@ button:disabled {
 
 .leaderboard-table .problem-cell {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    min-width: 62px;
 }
 
-.leaderboard-table .solved {
-    color: var(--success);
+.leaderboard-table .problem-cell-main {
     font-weight: 700;
+    line-height: 1;
 }
 
-.leaderboard-table .attempted {
-    color: var(--danger);
-    font-weight: 700;
+.leaderboard-table .problem-cell-sub {
+    margin-top: 4px;
+    font-size: 0.7rem;
+    color: var(--muted);
+}
+
+.leaderboard-table .status-ac {
+    color: #1c3a2d;
+    background: linear-gradient(180deg, #c7f7da 0%, #b0f0ca 100%);
+}
+
+.leaderboard-table .status-wa {
+    color: #4b1318;
+    background: linear-gradient(180deg, #ffd2d6 0%, #ffbcc3 100%);
+}
+
+.leaderboard-table .status-pending {
+    color: #4a3404;
+    background: linear-gradient(180deg, #ffeebf 0%, #ffe39a 100%);
+}
+
+.leaderboard-table .status-none {
+    color: var(--muted);
+}
+
+.leaderboard-table .pending-main {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.leaderboard-table .pending-loader {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    border: 2px solid rgba(74, 52, 4, 0.25);
+    border-top-color: #7d5a07;
+    animation: pendingSpin 0.85s linear infinite;
+}
+
+@keyframes pendingSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .match-status-bar {
@@ -1208,6 +1286,13 @@ button:disabled {
 
 .site-footer a:hover {
     text-decoration: underline;
+}
+
+.site-version {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    opacity: 0.78;
+    letter-spacing: 0.03em;
 }
 
 @media (max-width: 1080px) {

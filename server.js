@@ -13,7 +13,14 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3000;
 const RESULTS_FILE = path.join(__dirname, 'results.json');
 const BRACKETS_FILE = path.join(__dirname, 'brackets.json');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const FEEDBACK_FILE = path.join(__dirname, 'feedback.json');
+const ADMIN_HANDLE_HASH_SALT = 'blitz_admin_handle_v1';
+const ADMIN_PIN_HASH_SALT = 'blitz_admin_pin_v1';
+const ADMIN_PIN_HASH = 'ea8ed8fdc6e6e9bfb38c14d8ac51e35ef55881744fcb973e2265e605c16abb17';
+const ADMIN_HANDLE_HASHES = new Set([
+    'e2b82273d0435bda4c0b04fd0885cf2dd98549a44bdeb17bac2ddee9325a1552',
+    'd571523d4f27a5c5d831a9c14e5c6c1d0a5f29d57d267ce9a5ce732d58cf20fb'
+]);
 const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
 const ROOM_NO_OPPONENT_TIMEOUT_MS = 10 * 60 * 1000;
 const MATCH_START_COUNTDOWN_MS = 15 * 1000;
@@ -69,6 +76,93 @@ async function initBracketsFile() {
     } catch {
         await fs.writeFile(BRACKETS_FILE, JSON.stringify([]));
     }
+}
+
+function getEmptyFeedbackStore() {
+    return {
+        items: [],
+        activity: []
+    };
+}
+
+function normalizeFeedbackStatus(value) {
+    const token = String(value || 'open').trim().toLowerCase();
+    if (token === 'fixed') return 'fixed';
+    if (token === 'ignored') return 'ignored';
+    return 'open';
+}
+
+function normalizeFeedbackStoreShape(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return getEmptyFeedbackStore();
+    }
+
+    return {
+        items: Array.isArray(value.items) ? value.items : [],
+        activity: Array.isArray(value.activity) ? value.activity : []
+    };
+}
+
+async function initFeedbackFile() {
+    try {
+        const raw = await fs.readFile(FEEDBACK_FILE, 'utf8');
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) {
+            await fs.writeFile(FEEDBACK_FILE, JSON.stringify(getEmptyFeedbackStore(), null, 2));
+            return;
+        }
+
+        const parsed = JSON.parse(trimmed);
+        const normalized = normalizeFeedbackStoreShape(parsed);
+        if (!Array.isArray(parsed?.items) || !Array.isArray(parsed?.activity)) {
+            await fs.writeFile(FEEDBACK_FILE, JSON.stringify(normalized, null, 2));
+        }
+    } catch {
+        await fs.writeFile(FEEDBACK_FILE, JSON.stringify(getEmptyFeedbackStore(), null, 2));
+    }
+}
+
+async function readFeedbackStore() {
+    try {
+        const raw = await fs.readFile(FEEDBACK_FILE, 'utf8');
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) return getEmptyFeedbackStore();
+        return normalizeFeedbackStoreShape(JSON.parse(trimmed));
+    } catch {
+        return getEmptyFeedbackStore();
+    }
+}
+
+async function writeFeedbackStore(store) {
+    const normalized = normalizeFeedbackStoreShape(store);
+    await fs.writeFile(FEEDBACK_FILE, JSON.stringify(normalized, null, 2));
+}
+
+function pushFeedbackActivity(store, entry) {
+    if (!store || typeof store !== 'object') return;
+    if (!Array.isArray(store.activity)) store.activity = [];
+
+    store.activity.unshift({
+        id: `fa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        at: new Date().toISOString(),
+        type: String(entry?.type || 'updated'),
+        by: String(entry?.by || '').trim() || 'unknown',
+        feedbackId: String(entry?.feedbackId || '').trim(),
+        feedbackTitle: String(entry?.feedbackTitle || '').trim(),
+        details: entry?.details && typeof entry.details === 'object' ? entry.details : {}
+    });
+
+    if (store.activity.length > 500) {
+        store.activity = store.activity.slice(0, 500);
+    }
+}
+
+function canManageFeedback(feedbackItem, requesterHandle, adminPassword = '') {
+    const owner = normalizeHandle(feedbackItem?.createdBy);
+    const requester = normalizeHandle(requesterHandle);
+    const isOwner = !!owner && !!requester && owner === requester;
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
+    return isOwner || isAdmin;
 }
 
 async function initLastSeenFile() {
@@ -184,7 +278,6 @@ function markHandleSeen(handle, timestamp = Date.now()) {
     const normalized = normalizeHandle(handle);
     if (!normalized) return;
 
-    upsertProfileHandle(handle);
     lastSeenMap[normalized] = timestamp;
     saveLastSeenFile().catch(() => {});
 }
@@ -428,12 +521,12 @@ function generateBracketMatches(type, participants) {
 
 function canManageBracket(bracket, requesterHandle, adminPassword = '') {
     const isOwner = normalizeHandle(requesterHandle) && normalizeHandle(bracket?.ownerHandle) && normalizeHandle(requesterHandle) === normalizeHandle(bracket.ownerHandle);
-    const isAdmin = isValidAdminPassword(adminPassword || '');
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
     return isOwner || isAdmin;
 }
 
 function canCreateBracketRoom(bracket, match, requesterHandle, adminPassword = '') {
-    if (isValidAdminPassword(adminPassword || '')) return true;
+    if (isAdminRequester(requesterHandle, adminPassword || '')) return true;
 
     const requester = normalizeHandle(requesterHandle);
     if (!requester) return false;
@@ -443,6 +536,40 @@ function canCreateBracketRoom(bracket, match, requesterHandle, adminPassword = '
     const p2 = normalizeHandle(match?.p2);
 
     return requester === owner || requester === p1 || requester === p2;
+}
+
+function getBracketUsedProblemIds(bracket) {
+    if (!Array.isArray(bracket?.usedProblemIds)) return [];
+
+    const unique = new Set();
+    bracket.usedProblemIds.forEach(id => {
+        const token = String(id || '').trim();
+        if (!token) return;
+        unique.add(token);
+    });
+
+    return Array.from(unique);
+}
+
+async function reserveBracketProblemIds(bracketId, problemIds = []) {
+    const uniqueToReserve = Array.from(new Set((problemIds || [])
+        .map(id => String(id || '').trim())
+        .filter(Boolean)));
+    if (!bracketId || uniqueToReserve.length === 0) return;
+
+    const brackets = await readBrackets();
+    const index = brackets.findIndex(item => item.id === bracketId);
+    if (index === -1) return;
+
+    const bracket = brackets[index];
+    const existing = new Set(getBracketUsedProblemIds(bracket));
+    const initialSize = existing.size;
+
+    uniqueToReserve.forEach(id => existing.add(id));
+    if (existing.size === initialSize) return;
+
+    bracket.usedProblemIds = Array.from(existing);
+    await writeBrackets(brackets);
 }
 
 async function resolveTieWinnerByRules(player1Handle, player2Handle) {
@@ -716,11 +843,45 @@ function extractAdminPassword(req) {
     return '';
 }
 
-function isValidAdminPassword(input) {
-    if (!ADMIN_PASSWORD || typeof input !== 'string') return false;
+function extractRequesterHandle(req) {
+    const fromHeader = req.headers['x-requester-handle'];
+    if (typeof fromHeader === 'string' && fromHeader.trim()) {
+        return fromHeader.trim();
+    }
 
-    const inputBuffer = Buffer.from(input);
-    const adminBuffer = Buffer.from(ADMIN_PASSWORD);
+    if (req.body && typeof req.body.requesterHandle === 'string' && req.body.requesterHandle.trim()) {
+        return req.body.requesterHandle.trim();
+    }
+
+    if (req.query && typeof req.query.requesterHandle === 'string' && req.query.requesterHandle.trim()) {
+        return req.query.requesterHandle.trim();
+    }
+
+    return '';
+}
+
+function hashAdminToken(value, salt) {
+    return crypto.createHash('sha256').update(`${salt}:${value}`).digest('hex');
+}
+
+function isDeveloperAdminHandle(handle) {
+    const normalized = normalizeHandle(handle);
+    if (!normalized) return false;
+    const hashed = hashAdminToken(normalized, ADMIN_HANDLE_HASH_SALT);
+    return ADMIN_HANDLE_HASHES.has(hashed);
+}
+
+function isAdminRequester(requesterHandle, adminPassword = '') {
+    if (!isDeveloperAdminHandle(requesterHandle)) return false;
+    return isValidAdminPassword(adminPassword || '');
+}
+
+function isValidAdminPassword(input) {
+    if (typeof input !== 'string' || !input.trim()) return false;
+
+    const inputHash = hashAdminToken(input.trim(), ADMIN_PIN_HASH_SALT);
+    const inputBuffer = Buffer.from(inputHash);
+    const adminBuffer = Buffer.from(ADMIN_PIN_HASH);
     if (inputBuffer.length !== adminBuffer.length) return false;
 
     return crypto.timingSafeEqual(inputBuffer, adminBuffer);
@@ -1022,19 +1183,37 @@ async function generateRoomProblemForConfig(configProblem = {}, excludedIds = []
 async function startBattleForPair(room, startP1, startP2) {
     if (!room || (room.battleState && room.battleState.status === 'running')) return;
 
-    const excludedIds = room.validationProblem ? [room.validationProblem.id] : [];
-    let firstProblem = room.preGeneratedFirstProblem;
+    const excludedIds = Array.from(new Set([
+        ...(room.validationProblem ? [room.validationProblem.id] : []),
+        ...((Array.isArray(room.bracketExcludedProblemIds) ? room.bracketExcludedProblemIds : []).map(id => String(id || '').trim()).filter(Boolean))
+    ]));
+
+    const reservedProblems = Array.isArray(room.preGeneratedProblems) && room.preGeneratedProblems.length > 0
+        ? room.preGeneratedProblems.slice(0, room.problems.length)
+        : [];
+
+    let firstProblem = room.preGeneratedFirstProblem || reservedProblems[0] || null;
+    if (firstProblem?.id && room.validationProblem?.id && firstProblem.id === room.validationProblem.id) {
+        firstProblem = null;
+    }
     if (!firstProblem) {
         firstProblem = await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, excludedIds);
     }
     room.preGeneratedFirstProblem = null;
 
-    const selectedProblems = Array.from({ length: room.problems.length }, () => null);
+    const selectedProblems = Array.from({ length: room.problems.length }, (_, index) => reservedProblems[index] || null);
     selectedProblems[0] = firstProblem;
 
-    const usedProblemIds = [...excludedIds];
-    if (!usedProblemIds.includes(firstProblem.id)) {
-        usedProblemIds.push(firstProblem.id);
+    const usedProblemIds = Array.from(new Set([
+        ...excludedIds,
+        ...selectedProblems.filter(Boolean).map(problem => problem.id).filter(Boolean)
+    ]));
+
+    if (room.bracketId) {
+        await reserveBracketProblemIds(
+            room.bracketId,
+            selectedProblems.filter(Boolean).map(problem => problem.id).filter(Boolean)
+        );
     }
 
     const startsAt = Date.now();
@@ -1151,9 +1330,21 @@ async function evaluateRoomValidationAndAutoStart(room) {
         });
 
         if (validP1 && validP2 && statuses[p1] && statuses[p2] && !room.countdownInProgress) {
-            const excludedIds = room.validationProblem ? [room.validationProblem.id] : [];
+            const excludedIds = Array.from(new Set([
+                ...(room.validationProblem ? [room.validationProblem.id] : []),
+                ...((Array.isArray(room.bracketExcludedProblemIds) ? room.bracketExcludedProblemIds : []).map(id => String(id || '').trim()).filter(Boolean))
+            ]));
             try {
-                room.preGeneratedFirstProblem = await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, excludedIds);
+                let reservedFirstProblem = Array.isArray(room.preGeneratedProblems) && room.preGeneratedProblems.length > 0
+                    ? room.preGeneratedProblems[0]
+                    : null;
+
+                if (reservedFirstProblem?.id && room.validationProblem?.id && reservedFirstProblem.id === room.validationProblem.id) {
+                    reservedFirstProblem = null;
+                }
+
+                room.preGeneratedFirstProblem = reservedFirstProblem
+                    || await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, excludedIds);
             } catch (generationError) {
                 console.error('Problem generation before countdown failed:', generationError);
                 broadcastValidationStatus(room, {
@@ -1270,7 +1461,11 @@ function createRoomWithSharedLogic({
     interval = 1,
     problems = [],
     problemCount = 7,
-    validationFailureMessage = 'Validation problem generation failed. Please recreate room.'
+    validationFailureMessage = 'Validation problem generation failed. Please recreate room.',
+    preGeneratedProblems = [],
+    bracketId = null,
+    bracketMatchId = null,
+    bracketExcludedProblemIds = []
 }) {
     const roomId = generateRoomId();
     const validationProblem = null;
@@ -1297,6 +1492,10 @@ function createRoomWithSharedLogic({
         countdownEndsAt: null,
         countdownInProgress: false,
         preGeneratedFirstProblem: null,
+        preGeneratedProblems: Array.isArray(preGeneratedProblems) ? preGeneratedProblems : [],
+        bracketId: bracketId || null,
+        bracketMatchId: bracketMatchId || null,
+        bracketExcludedProblemIds: Array.isArray(bracketExcludedProblemIds) ? bracketExcludedProblemIds : [],
         pendingSubmissionActive: false,
         validationCheckInProgress: false,
         startInProgress: false,
@@ -1353,7 +1552,19 @@ function createRoomWithSharedLogic({
     return room;
 }
 
-async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [], problemCount = 7 }) {
+async function createBracketRoom({
+    hostHandle,
+    opponentHandle,
+    roomName,
+    duration = 40,
+    interval = 1,
+    problems = [],
+    problemCount = 7,
+    preGeneratedProblems = [],
+    bracketId = null,
+    bracketMatchId = null,
+    bracketExcludedProblemIds = []
+}) {
     return createRoomWithSharedLogic({
         hostHandle,
         hostWs: null,
@@ -1363,6 +1574,10 @@ async function createBracketRoom({ hostHandle, opponentHandle, roomName, duratio
         interval,
         problems,
         problemCount,
+        preGeneratedProblems,
+        bracketId,
+        bracketMatchId,
+        bracketExcludedProblemIds,
         validationFailureMessage: 'Validation problem generation failed. Please create a new room.'
     });
 }
@@ -1462,10 +1677,18 @@ wss.on('connection', (ws) => {
                 const leftHandle = room.players[playerIndex].handle;
                 room.players[playerIndex].ws = null;
 
+                sendToRoom(room, {
+                    type: 'PLAYER_LEFT',
+                    handle: leftHandle,
+                    players: room.players.filter(p => !!p.handle).map(p => p.handle)
+                });
+
                 if (cleanupUnstartedRoomIfHostLeft(room, leftHandle)) {
                     broadcastActiveRooms();
                     break;
                 }
+
+                evaluateRoomValidationAndAutoStart(room).catch(() => {});
 
                 broadcastActiveRooms();
                 break;
@@ -1644,6 +1867,13 @@ async function handleProblemSolved(ws, data) {
         room.battleState.selectedProblems = Array.from({ length: totalProblems }, () => null);
     }
     if (room.battleState.selectedProblems[nextProblemIndex]) {
+        const existingProblem = room.battleState.selectedProblems[nextProblemIndex];
+        sendToRoom(room, {
+            type: 'NEXT_PROBLEM_READY',
+            roomId: room.id,
+            problemNumber: nextProblemNumber,
+            problem: existingProblem
+        });
         return;
     }
 
@@ -1666,6 +1896,10 @@ async function handleProblemSolved(ws, data) {
         room.battleState.selectedProblems[nextProblemIndex] = nextProblem;
         if (!room.battleState.usedProblemIds.includes(nextProblem.id)) {
             room.battleState.usedProblemIds.push(nextProblem.id);
+        }
+
+        if (room.bracketId) {
+            await reserveBracketProblemIds(room.bracketId, [nextProblem.id]);
         }
 
         sendToRoom(room, {
@@ -2016,8 +2250,9 @@ app.post('/api/results', async (req, res) => {
 
 app.post('/api/admin/verify', (req, res) => {
     const suppliedPassword = extractAdminPassword(req);
-    if (!isValidAdminPassword(suppliedPassword)) {
-        res.status(401).json({ error: 'Invalid admin password' });
+    const requesterHandle = extractRequesterHandle(req);
+    if (!isAdminRequester(requesterHandle, suppliedPassword)) {
+        res.status(401).json({ error: 'Invalid admin credentials' });
         return;
     }
 
@@ -2026,8 +2261,9 @@ app.post('/api/admin/verify', (req, res) => {
 
 app.delete('/api/results', async (req, res) => {
     const suppliedPassword = extractAdminPassword(req);
-    if (!isValidAdminPassword(suppliedPassword)) {
-        res.status(401).json({ error: 'Invalid admin password' });
+    const requesterHandle = extractRequesterHandle(req);
+    if (!isAdminRequester(requesterHandle, suppliedPassword)) {
+        res.status(401).json({ error: 'Invalid admin credentials' });
         return;
     }
 
@@ -2037,6 +2273,207 @@ app.delete('/api/results', async (req, res) => {
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify({ type: 'RESULTS_UPDATED' }));
+            }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/feedback', async (req, res) => {
+    try {
+        const store = await readFeedbackStore();
+        const items = [...store.items].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        const activity = [...store.activity].sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
+        res.json({ items, activity });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/feedback', async (req, res) => {
+    try {
+        const requesterHandle = extractRequesterHandle(req);
+        if (!requesterHandle) {
+            res.status(400).json({ error: 'requesterHandle is required' });
+            return;
+        }
+
+        const title = String(req.body?.title || '').trim();
+        const message = String(req.body?.message || '').trim();
+        if (!message) {
+            res.status(400).json({ error: 'message is required' });
+            return;
+        }
+
+        const store = await readFeedbackStore();
+        const next = {
+            id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            title: title || 'Untitled Feedback',
+            message,
+            status: 'open',
+            createdBy: requesterHandle,
+            createdAt: new Date().toISOString(),
+            updatedBy: null,
+            updatedAt: null,
+            history: []
+        };
+
+        store.items.unshift(next);
+        pushFeedbackActivity(store, {
+            type: 'created',
+            by: requesterHandle,
+            feedbackId: next.id,
+            feedbackTitle: next.title
+        });
+
+        await writeFeedbackStore(store);
+
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'FEEDBACK_UPDATED' }));
+            }
+        });
+
+        res.json(next);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.patch('/api/feedback/:feedbackId', async (req, res) => {
+    try {
+        const feedbackId = String(req.params.feedbackId || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
+        const adminPassword = extractAdminPassword(req);
+
+        if (!feedbackId) {
+            res.status(400).json({ error: 'feedbackId is required' });
+            return;
+        }
+
+        const store = await readFeedbackStore();
+        const index = store.items.findIndex(item => item.id === feedbackId);
+        if (index === -1) {
+            res.status(404).json({ error: 'Feedback not found' });
+            return;
+        }
+
+        const current = store.items[index];
+        if (!canManageFeedback(current, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only feedback author or admin can modify this item' });
+            return;
+        }
+
+        const nextTitleRaw = req.body?.title;
+        const nextMessageRaw = req.body?.message;
+        const nextStatusRaw = req.body?.status;
+
+        const nextTitle = nextTitleRaw === undefined ? current.title : (String(nextTitleRaw || '').trim() || 'Untitled Feedback');
+        const nextMessage = nextMessageRaw === undefined ? current.message : String(nextMessageRaw || '').trim();
+        const nextStatus = nextStatusRaw === undefined ? current.status : normalizeFeedbackStatus(nextStatusRaw);
+
+        if (!nextMessage) {
+            res.status(400).json({ error: 'message cannot be empty' });
+            return;
+        }
+
+        const changed = nextTitle !== current.title || nextMessage !== current.message || nextStatus !== current.status;
+        if (!changed) {
+            res.json(current);
+            return;
+        }
+
+        const updatedAt = new Date().toISOString();
+        const next = {
+            ...current,
+            title: nextTitle,
+            message: nextMessage,
+            status: nextStatus,
+            updatedBy: requesterHandle,
+            updatedAt,
+            history: [
+                ...(Array.isArray(current.history) ? current.history : []),
+                {
+                    at: updatedAt,
+                    by: requesterHandle,
+                    fromStatus: current.status,
+                    toStatus: nextStatus,
+                    changedTitle: nextTitle !== current.title,
+                    changedMessage: nextMessage !== current.message
+                }
+            ]
+        };
+
+        store.items[index] = next;
+        pushFeedbackActivity(store, {
+            type: 'updated',
+            by: requesterHandle,
+            feedbackId: next.id,
+            feedbackTitle: next.title,
+            details: {
+                fromStatus: current.status,
+                toStatus: next.status
+            }
+        });
+
+        await writeFeedbackStore(store);
+
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'FEEDBACK_UPDATED' }));
+            }
+        });
+
+        res.json(next);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/feedback/:feedbackId', async (req, res) => {
+    try {
+        const feedbackId = String(req.params.feedbackId || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
+        const adminPassword = extractAdminPassword(req);
+
+        if (!feedbackId) {
+            res.status(400).json({ error: 'feedbackId is required' });
+            return;
+        }
+
+        const store = await readFeedbackStore();
+        const index = store.items.findIndex(item => item.id === feedbackId);
+        if (index === -1) {
+            res.status(404).json({ error: 'Feedback not found' });
+            return;
+        }
+
+        const target = store.items[index];
+        if (!canManageFeedback(target, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only feedback author or admin can delete this item' });
+            return;
+        }
+
+        store.items.splice(index, 1);
+        pushFeedbackActivity(store, {
+            type: 'deleted',
+            by: requesterHandle,
+            feedbackId: target.id,
+            feedbackTitle: target.title,
+            details: {
+                deletedStatus: target.status,
+                createdBy: target.createdBy
+            }
+        });
+
+        await writeFeedbackStore(store);
+
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'FEEDBACK_UPDATED' }));
             }
         });
 
@@ -2086,6 +2523,7 @@ app.post('/api/brackets', async (req, res) => {
             ownerHandle,
             participants,
             roomConfig,
+            usedProblemIds: [],
             matches: generateBracketMatches(type, participants),
             createdAt: new Date().toISOString()
         };
@@ -2176,6 +2614,21 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
         }
 
         const roomConfig = normalizeBracketRoomConfig(bracket.roomConfig || {});
+        const requestedProblemConfigs = Array.isArray(body.problems) && body.problems.length > 0
+            ? normalizeRoomProblems(body.problems, body.problems.length)
+            : (Array.isArray(roomConfig.problems) && roomConfig.problems.length > 0
+                ? roomConfig.problems
+                : buildDefaultProblems(roomConfig.problemCount));
+        const bracketUsedProblemIds = getBracketUsedProblemIds(bracket);
+        const preGeneratedProblems = await generateRoomProblems(requestedProblemConfigs, bracketUsedProblemIds);
+        const reservedProblemIds = preGeneratedProblems
+            .map(problem => String(problem?.id || '').trim())
+            .filter(Boolean);
+
+        bracket.usedProblemIds = Array.from(new Set([
+            ...bracketUsedProblemIds,
+            ...reservedProblemIds
+        ]));
 
         const room = await createBracketRoom({
             hostHandle: match.p1,
@@ -2183,8 +2636,12 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
             roomName: `${bracket.name} · ${match.label} · ${match.p1} vs ${match.p2}`,
             duration: Number(body.duration) || roomConfig.duration,
             interval: Number(body.interval) || roomConfig.interval,
-            problems: Array.isArray(body.problems) ? body.problems : (Array.isArray(roomConfig.problems) ? roomConfig.problems : []),
-            problemCount: Number(body.problemCount) || roomConfig.problemCount
+            problems: requestedProblemConfigs,
+            problemCount: requestedProblemConfigs.length || Number(body.problemCount) || roomConfig.problemCount,
+            preGeneratedProblems,
+            bracketId: bracket.id,
+            bracketMatchId: match.id,
+            bracketExcludedProblemIds: bracket.usedProblemIds
         });
 
         match.roomId = room.id;
@@ -2202,6 +2659,7 @@ const RESERVED_HANDLE_PATHS = new Set([
     'bracket',
     'headtohead',
     'leaderboard',
+    'feedback',
     'profile',
     'api'
 ]);
@@ -2221,14 +2679,28 @@ app.get('/:handle([A-Za-z0-9_-]{1,24})', (req, res, next) => {
     res.redirect(302, `/profile.html?handle=${encodeURIComponent(handle)}`);
 });
 
-Promise.all([initResultsFile(), initBracketsFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
+Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
     setInterval(() => {
         rooms.forEach(room => {
             evaluateRoomValidationAndAutoStart(room).catch(() => {});
         });
     }, ROOM_VALIDATION_POLL_MS);
 
+    server.on('error', (error) => {
+        if (error && error.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} is already in use. Stop the existing server or change PORT.`);
+            return;
+        }
+        console.error('HTTP server error:', error);
+    });
+
+    wss.on('error', (error) => {
+        console.error('WebSocket server error:', error);
+    });
+
     server.listen(PORT, () => {
         console.log(`Server running on https://blitzing-2.onrender.com`);
     });
+}).catch((error) => {
+    console.error('Server initialization failed:', error);
 });

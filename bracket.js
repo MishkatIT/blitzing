@@ -1,6 +1,7 @@
 (function () {
     const API_BASE_URL = window.location.origin;
     const OWNER_KEY = 'blitzUserHandle';
+    const ADMIN_HANDLES = new Set(['else_if_tridib21', 'mishkatit']);
 
     const typeGrid = document.getElementById('typeGrid');
     const generateBracketBtn = document.getElementById('generateBracketBtn');
@@ -243,6 +244,10 @@
         return (localStorage.getItem(OWNER_KEY) || '').trim();
     }
 
+    function isAdminHandle(handle) {
+        return ADMIN_HANDLES.has(String(handle || '').trim().toLowerCase());
+    }
+
     function getSelectedType() {
         const selected = document.querySelector('input[name="tournamentType"]:checked');
         return selected ? selected.value : 'round-robin';
@@ -319,6 +324,43 @@
             if (a.side !== b.side) return a.side.localeCompare(b.side);
             return a.round - b.round;
         });
+    }
+
+    function getRoundColorVars(round) {
+        const palette = [
+            { border: '#2f4a72', top: 'rgba(110, 168, 254, 0.16)', bottom: 'rgba(110, 168, 254, 0.04)' },
+            { border: '#30543f', top: 'rgba(90, 203, 138, 0.15)', bottom: 'rgba(90, 203, 138, 0.04)' },
+            { border: '#5a4377', top: 'rgba(198, 123, 243, 0.18)', bottom: 'rgba(198, 123, 243, 0.05)' },
+            { border: '#6b5331', top: 'rgba(255, 184, 106, 0.2)', bottom: 'rgba(255, 184, 106, 0.06)' },
+            { border: '#5a3f4c', top: 'rgba(255, 125, 125, 0.16)', bottom: 'rgba(255, 125, 125, 0.05)' },
+            { border: '#3e5460', top: 'rgba(102, 217, 239, 0.16)', bottom: 'rgba(102, 217, 239, 0.05)' }
+        ];
+
+        const index = Math.max(0, (Number(round) || 1) - 1) % palette.length;
+        return palette[index];
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getRankClassByMaxRating(maxRating) {
+        const value = Number(maxRating);
+        if (!Number.isFinite(value)) return 'rank-newbie';
+        if (value >= 3000) return 'rank-lgm';
+        if (value >= 2600) return 'rank-gm';
+        if (value >= 2300) return 'rank-im';
+        if (value >= 2100) return 'rank-master';
+        if (value >= 1900) return 'rank-cm';
+        if (value >= 1600) return 'rank-expert';
+        if (value >= 1400) return 'rank-specialist';
+        if (value >= 1200) return 'rank-pupil';
+        return 'rank-newbie';
     }
 
     function isPlaceholderMatch(match) {
@@ -416,7 +458,7 @@
         return rows;
     }
 
-    function renderStandingsPanel(bracket) {
+    function renderStandingsPanel(bracket, ratingsMap) {
         const standings = computeBracketStandings(bracket);
         if (!standings.length) {
             return '<div class="standings-panel"><h4>Standings</h4><p class="note">No participants found.</p></div>';
@@ -425,7 +467,7 @@
         const rowsHtml = standings.map((row, index) => `
             <tr>
                 <td>${index + 1}</td>
-                <td>${row.handle}</td>
+                <td>${renderPlayer(row.handle, ratingsMap)}</td>
                 <td>${row.played}</td>
                 <td>${row.wins}</td>
                 <td>${row.points}</td>
@@ -486,6 +528,10 @@
                         rating: user.rating ?? null,
                         maxRating: user.maxRating ?? null
                     });
+                    map.set(String(user.handle || '').toLowerCase(), {
+                        rating: user.rating ?? null,
+                        maxRating: user.maxRating ?? null
+                    });
                 });
             } catch (error) {
                 console.warn('Rating lookup failed for chunk', chunk, error);
@@ -498,15 +544,33 @@
     function renderPlayer(handle, ratingsMap) {
         if (!handle) return 'TBD';
         if (/winner|loser|champion|slot|bye/i.test(handle)) {
-            return handle;
+            return escapeHtml(handle);
         }
 
-        const profile = ratingsMap?.get(handle);
-        if (!profile || profile.rating === null || profile.rating === undefined) {
-            return handle;
+        const profile = ratingsMap?.get(handle) || ratingsMap?.get(String(handle).toLowerCase()) || null;
+        const safeHandle = escapeHtml(handle);
+        const currentRating = profile?.rating;
+        const maxRating = profile?.maxRating;
+        const rankClass = getRankClassByMaxRating(maxRating);
+        const currentText = Number.isFinite(Number(currentRating)) ? Number(currentRating) : '-';
+        const ultraLegendary = Number(maxRating) >= 4000;
+        const legendary = Number(maxRating) >= 3000;
+        const firstChar = safeHandle.charAt(0);
+        const restChars = safeHandle.slice(1);
+        let handleHtml = `<span class="player-handle-max ${rankClass}">${safeHandle}</span>`;
+
+        if (safeHandle.length > 1 && ultraLegendary) {
+            handleHtml = `<span class="player-handle-ultra-first">${firstChar}</span><span class="player-handle-ultra-rest">${restChars}</span>`;
+        } else if (safeHandle.length > 1 && legendary) {
+            handleHtml = `<span class="player-handle-legendary-first">${firstChar}</span><span class="player-handle-legendary-rest">${restChars}</span>`;
         }
 
-        return `${handle} (${profile.rating})`;
+        return `
+            <span class="player-chip">
+                ${handleHtml}
+                <span class="player-current-rating">current rating ${currentText}</span>
+            </span>
+        `;
     }
 
     function getMatchHistoryUrl(match) {
@@ -536,8 +600,9 @@
         const ratingsMap = await fetchRatingsMap(getAllConcreteHandles([bracket]));
 
         const groups = groupMatches(bracket.matches || []);
-        const standingsHtml = renderStandingsPanel(bracket);
+        const standingsHtml = renderStandingsPanel(bracket, ratingsMap);
         const html = groups.map(group => {
+            const roundColors = getRoundColorVars(group.round);
             const matches = group.matches.map(match => {
                 const status = match.status === 'completed'
                     ? `Winner: ${match.winner || '-'}`
@@ -568,7 +633,7 @@
             }).join('');
 
             return `
-                <div class="round-box" data-round="${group.round}" data-side="${group.side}">
+                <div class="round-box" data-round="${group.round}" data-side="${group.side}" style="--round-border:${roundColors.border};--round-bg-top:${roundColors.top};--round-bg-bottom:${roundColors.bottom};">
                     <h4>${group.title}</h4>
                     <div class="round-matches">${matches}</div>
                 </div>
@@ -603,8 +668,9 @@
             const cards = brackets.map(bracket => {
                 const isExpanded = expandedBracketIds.has(bracket.id);
                 const groups = groupMatches(bracket.matches || []);
-                const standingsHtml = renderStandingsPanel(bracket);
+                const standingsHtml = renderStandingsPanel(bracket, ratingsMap);
                 const matchesHtml = groups.map(group => {
+                    const roundColors = getRoundColorVars(group.round);
                     const items = group.matches.map(match => {
                         const ready = !isPlaceholderMatch(match);
                         const completed = match.status === 'completed';
@@ -643,7 +709,7 @@
                     }).join('');
 
                     return `
-                        <div class="round-box" data-round="${group.round}" data-side="${group.side}" style="margin-bottom:8px;">
+                        <div class="round-box" data-round="${group.round}" data-side="${group.side}" style="--round-border:${roundColors.border};--round-bg-top:${roundColors.top};--round-bg-bottom:${roundColors.bottom};margin-bottom:8px;">
                             <h4>${group.title}</h4>
                             <div class="round-matches">${items}</div>
                         </div>
@@ -651,6 +717,7 @@
                 }).join('');
 
                 const canDeleteAsOwner = myHandle && bracket.ownerHandle === myHandle;
+                const canDelete = !!canDeleteAsOwner || isAdminHandle(myHandle);
 
                 return `
                     <div class="saved-card" data-bracket-card-id="${bracket.id}">
@@ -660,9 +727,11 @@
                             </div>
                             <div class="saved-actions">
                                 <span class="saved-expand">${isExpanded ? 'Collapse' : 'Expand'}</span>
+                                ${canDelete ? `
                                 <button class="small-btn delete-bracket-btn ${canDeleteAsOwner ? 'danger' : ''}" data-bracket-id="${bracket.id}">
                                     Delete Bracket
                                 </button>
+                                ` : ''}
                             </div>
                         </div>
                         <div class="saved-details" style="display:${isExpanded ? 'block' : 'none'};">
@@ -687,7 +756,7 @@
     async function generateBracket() {
         const ownerHandle = getCurrentHandle();
         if (!ownerHandle) {
-            alert('Please set your handle first on Arena page.');
+            alert('Please login first on Arena page.');
             return;
         }
 
@@ -723,23 +792,36 @@
 
     async function deleteBracket(bracketId) {
         const requesterHandle = getCurrentHandle();
-        const tryDelete = async (adminPassword = '') => {
-            return fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
-                method: 'DELETE',
-                headers: adminPassword ? { 'x-admin-password': adminPassword, 'Content-Type': 'application/json' } : undefined,
-                body: adminPassword ? JSON.stringify({ password: adminPassword }) : undefined
-            });
-        };
+        if (!requesterHandle) {
+            alert('Please login first on Arena page.');
+            return;
+        }
 
-        let response = await tryDelete();
-        if (response.status === 403) {
-            const adminPassword = prompt('Only creator/admin can delete. Enter admin password:');
+        let response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
+            method: 'DELETE'
+        });
+
+        if (response.status === 403 && isAdminHandle(requesterHandle)) {
+            const adminPassword = prompt('Admin PIN required to delete bracket:');
             if (!adminPassword) return;
-            response = await tryDelete(adminPassword);
+
+            response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-admin-password': adminPassword,
+                    'x-requester-handle': requesterHandle
+                },
+                body: JSON.stringify({ requesterHandle, password: adminPassword })
+            });
         }
 
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
+            if (response.status === 403 && !isAdminHandle(requesterHandle)) {
+                alert('Only admin can delete this bracket.');
+                return;
+            }
             alert(data.error || 'Could not delete bracket');
             return;
         }
@@ -752,33 +834,37 @@
     async function createRoomFromMatch(bracketId, matchId) {
         const requesterHandle = getCurrentHandle();
         if (!requesterHandle) {
-            alert('Please set your handle first on Arena page.');
+            alert('Please login first on Arena page.');
             return;
         }
 
-        const tryCreate = async (adminPassword = '') => {
-            const headers = { 'Content-Type': 'application/json' };
-            if (adminPassword) headers['x-admin-password'] = adminPassword;
+        let response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requesterHandle })
+        });
 
-            return fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    requesterHandle,
-                    ...(adminPassword ? { password: adminPassword } : {})
-                })
-            });
-        };
-
-        let response = await tryCreate();
-        if (response.status === 403) {
-            const adminPassword = prompt('Only the two players, bracket creator, or admin can create this room. If admin, enter password:');
+        if (response.status === 403 && isAdminHandle(requesterHandle)) {
+            const adminPassword = prompt('Admin PIN required to create room for this match:');
             if (!adminPassword) return;
-            response = await tryCreate(adminPassword);
+
+            response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-admin-password': adminPassword,
+                    'x-requester-handle': requesterHandle
+                },
+                body: JSON.stringify({ requesterHandle, password: adminPassword })
+            });
         }
 
         const data = await response.json();
         if (!response.ok) {
+            if (response.status === 403 && !isAdminHandle(requesterHandle)) {
+                alert('Only match players, bracket creator, or admin can create this room.');
+                return;
+            }
             alert(data.error || 'Could not create room for this match');
             return;
         }

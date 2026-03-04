@@ -312,12 +312,7 @@
 
         try {
             await ensureResultsLoaded();
-            await fetch(`${API_BASE_URL}/api/profiles`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ handle: cleanHandle })
-            });
-            await ensureListedProfilesLoaded(true);
+            await ensureListedProfilesLoaded();
 
             const [profile, presence] = await Promise.all([
                 fetchUserProfileDetails(cleanHandle),
