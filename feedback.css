@@ -274,6 +274,10 @@ textarea {
     gap: 8px;
 }
 
+.feedback-reply-block + .feedback-actions {
+    margin-top: 10px;
+}
+
 .feedback-reply-block {
     border-top: 1px solid var(--border);
     margin-top: 10px;
@@ -291,8 +295,25 @@ textarea {
 .feedback-reply-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 8px;
+}
+
+.feedback-reply-footer {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.feedback-reply-content {
+    display: grid;
+    gap: 8px;
+    border-left: 1px solid var(--border);
+    padding-left: 10px;
+    margin-left: 4px;
+}
+
+.feedback-reply-content.is-hidden {
+    display: none;
 }
 
 .feedback-replies {
@@ -329,6 +350,12 @@ textarea {
 .feedback-reply-compose {
     display: grid;
     gap: 8px;
+}
+
+.feedback-reply-compose > .action-btn {
+    justify-self: start;
+    width: auto;
+    min-width: 120px;
 }
 
 .feedback-reply-compose.is-hidden {

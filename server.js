@@ -2989,7 +2989,12 @@ app.post('/api/feedback/:feedbackId/replies', async (req, res) => {
     try {
         const feedbackId = String(req.params.feedbackId || '').trim();
         const requesterHandle = extractRequesterHandle(req);
-        const replyBy = String(requesterHandle || '').trim() || 'anonymous';
+        if (!requesterHandle) {
+            res.status(401).json({ error: 'Login required' });
+            return;
+        }
+
+        const replyBy = String(requesterHandle || '').trim();
         const message = String(req.body?.message || '').trim();
 
         if (!feedbackId) {
@@ -3003,6 +3008,25 @@ app.post('/api/feedback/:feedbackId/replies', async (req, res) => {
         }
 
         const store = await readFeedbackStore();
+        const requesterNorm = normalizeHandle(replyBy);
+        const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
+        const recentReplyCount = (Array.isArray(store.items) ? store.items : []).reduce((count, item) => {
+            const replies = Array.isArray(item?.replies) ? item.replies : [];
+            const perItemCount = replies.reduce((innerCount, replyItem) => {
+                const sameUser = normalizeHandle(replyItem?.createdBy) === requesterNorm;
+                if (!sameUser) return innerCount;
+                const createdMs = new Date(replyItem?.createdAt || 0).getTime();
+                if (!Number.isFinite(createdMs) || createdMs < cutoffMs) return innerCount;
+                return innerCount + 1;
+            }, 0);
+            return count + perItemCount;
+        }, 0);
+
+        if (recentReplyCount >= FEEDBACK_DAILY_LIMIT) {
+            res.status(429).json({ error: `Daily reply limit reached (${FEEDBACK_DAILY_LIMIT} per 24 hours)` });
+            return;
+        }
+
         const index = store.items.findIndex(item => item.id === feedbackId);
         if (index === -1) {
             res.status(404).json({ error: 'Feedback not found' });

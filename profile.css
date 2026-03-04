@@ -188,8 +188,9 @@ label {
 
 .search-grid {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px;
+    grid-template-columns: minmax(260px, 420px) auto;
+    justify-content: start;
+    gap: 8px;
     align-items: end;
 }
 

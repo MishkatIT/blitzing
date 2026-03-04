@@ -192,12 +192,16 @@
                     <div class="feedback-reply-block">
                         <div class="feedback-reply-head">
                             <div class="feedback-reply-title">Replies (${replies.length})</div>
-                            <button class="action-btn mini" data-action="toggle-reply" data-id="${escapeHtml(item.id)}">${isReplyOpen ? 'Close' : 'Reply'}</button>
                         </div>
-                        ${repliesHtml}
-                        <div class="feedback-reply-compose ${isReplyOpen ? '' : 'is-hidden'}" data-reply-compose="${escapeHtml(item.id)}">
-                            <textarea class="feedback-reply-input" data-id="${escapeHtml(item.id)}" rows="2" placeholder="Write a reply..."></textarea>
-                            <button class="action-btn" data-action="reply" data-id="${escapeHtml(item.id)}">Post Reply</button>
+                        <div class="feedback-reply-footer">
+                            <button class="action-btn mini" data-action="toggle-reply" data-id="${escapeHtml(item.id)}">${isReplyOpen ? 'Collapse' : 'Expand'}</button>
+                        </div>
+                        <div class="feedback-reply-content ${isReplyOpen ? '' : 'is-hidden'}">
+                            ${repliesHtml}
+                            <div class="feedback-reply-compose" data-reply-compose="${escapeHtml(item.id)}">
+                                <textarea class="feedback-reply-input" data-id="${escapeHtml(item.id)}" rows="2" placeholder="Write a reply..."></textarea>
+                                <button class="action-btn" data-action="reply" data-id="${escapeHtml(item.id)}">Post Reply</button>
+                            </div>
                         </div>
                     </div>
                     <div class="feedback-actions">${actionButtons}</div>
@@ -331,6 +335,11 @@
 
     async function submitReply(feedbackId, message) {
         const requesterHandle = getCurrentHandle();
+        if (!requesterHandle) {
+            alert('Please login first');
+            return;
+        }
+
         const payload = {
             message: String(message || '').trim()
         };

@@ -131,9 +131,36 @@
 
         const selectedNorm = normalize(selectedHandle);
         allProfilesList.innerHTML = handles.map(handle => {
+            const handleNorm = normalize(handle);
             const activeClass = normalize(handle) === selectedNorm ? ' active' : '';
-            return `<a class="profile-chip${activeClass}" href="/${encodeURIComponent(handle)}">${handle}</a>`;
+            return `<a class="profile-chip${activeClass}" data-handle-norm="${handleNorm}" href="/${encodeURIComponent(handle)}">${handle}</a>`;
         }).join('');
+    }
+
+    function scrollToListedHandle(handle) {
+        if (!allProfilesList) return;
+        const handleNorm = normalize(handle);
+        if (!handleNorm) return;
+
+        const chips = Array.from(allProfilesList.querySelectorAll('.profile-chip'));
+        const chip = chips.find(element => normalize(element.getAttribute('data-handle-norm') || element.textContent || '') === handleNorm);
+        if (!chip) return;
+
+        requestAnimationFrame(() => {
+            chip.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+                inline: 'nearest'
+            });
+
+            if (typeof chip.focus === 'function') {
+                try {
+                    chip.focus({ preventScroll: true });
+                } catch {
+                    chip.focus();
+                }
+            }
+        });
     }
 
     async function fetchUserProfileDetails(handle) {
@@ -363,6 +390,7 @@
             const stats = buildSiteUserStats(cleanHandle);
             renderProfile(profile, stats, presence);
             renderAllListedProfiles(cleanHandle);
+            scrollToListedHandle(cleanHandle);
 
             const normalizedPath = `/${encodeURIComponent(cleanHandle)}`;
             if (window.location.pathname !== normalizedPath) {
