@@ -23,6 +23,7 @@ const ADMIN_HANDLE_HASHES = new Set([
 ]);
 const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
 const ROOM_NO_OPPONENT_TIMEOUT_MS = 10 * 60 * 1000;
+const ROOM_UNSTARTED_TIMEOUT_MS = 20 * 60 * 1000;
 const MATCH_START_COUNTDOWN_MS = 15 * 1000;
 const ROOM_PENDING_RECHECK_DELAY_MS = 60 * 1000;
 const ROOM_VALIDATION_POLL_MS = 2000;
@@ -884,11 +885,36 @@ async function updateBracketMatchFromResult(resultPayload) {
         if (!Array.isArray(bracket.matches)) continue;
 
         for (const match of bracket.matches) {
-            if (match.roomId !== roomId || match.status === 'completed') continue;
+            if (match.roomId !== roomId) continue;
 
             const p1Handle = match.p1;
             const p2Handle = match.p2;
             const winnerRaw = resultPayload.winner;
+            const wasCompleted = match.status === 'completed';
+
+            const payloadP1Handle = normalizeHandle(resultPayload?.player1?.handle);
+            const payloadP2Handle = normalizeHandle(resultPayload?.player2?.handle);
+            const matchP1Handle = normalizeHandle(p1Handle);
+            const matchP2Handle = normalizeHandle(p2Handle);
+
+            let player1Score = resultPayload?.player1?.score ?? null;
+            let player2Score = resultPayload?.player2?.score ?? null;
+
+            const payloadOrderMatchesBracket = payloadP1Handle
+                && payloadP2Handle
+                && payloadP1Handle === matchP1Handle
+                && payloadP2Handle === matchP2Handle;
+
+            const payloadOrderReversed = payloadP1Handle
+                && payloadP2Handle
+                && payloadP1Handle === matchP2Handle
+                && payloadP2Handle === matchP1Handle;
+
+            if (payloadOrderReversed && !payloadOrderMatchesBracket) {
+                const swapped = player1Score;
+                player1Score = player2Score;
+                player2Score = swapped;
+            }
 
             let winnerHandle = winnerRaw;
             if (winnerRaw === 'tie') {
@@ -900,17 +926,19 @@ async function updateBracketMatchFromResult(resultPayload) {
             match.result = {
                 winnerOriginal: winnerRaw,
                 winnerResolved: winnerHandle,
-                player1Score: resultPayload?.player1?.score ?? null,
-                player2Score: resultPayload?.player2?.score ?? null,
+                player1Score,
+                player2Score,
                 finishedAt: resultPayload?.date || new Date().toISOString()
             };
 
-            const propagated = applyWinnerToNextSlots(bracket, match, winnerHandle);
-            const championUpdated = applyChampionPlaceholders(bracket);
-            const autoByeAdvanced = autoAdvanceBracketByes(bracket);
+            if (!wasCompleted) {
+                const propagated = applyWinnerToNextSlots(bracket, match, winnerHandle);
+                const championUpdated = applyChampionPlaceholders(bracket);
+                const autoByeAdvanced = autoAdvanceBracketByes(bracket);
 
-            if (propagated || championUpdated || autoByeAdvanced) {
-                changed = true;
+                if (propagated || championUpdated || autoByeAdvanced) {
+                    changed = true;
+                }
             }
 
             changed = true;
@@ -1675,6 +1703,16 @@ async function ensureFirstProblemReady(room) {
 async function startBattleForPair(room, startP1, startP2) {
     if (!room || (room.battleState && room.battleState.status === 'running')) return;
 
+    if (room.noOpponentTimeout) {
+        clearTimeout(room.noOpponentTimeout);
+        room.noOpponentTimeout = null;
+    }
+
+    if (room.unstartedTimeout) {
+        clearTimeout(room.unstartedTimeout);
+        room.unstartedTimeout = null;
+    }
+
     const excludedIds = Array.from(new Set([
         ...(room.validationProblem ? [room.validationProblem.id] : []),
         ...((Array.isArray(room.bracketExcludedProblemIds) ? room.bracketExcludedProblemIds : []).map(id => String(id || '').trim()).filter(Boolean))
@@ -1906,6 +1944,64 @@ function scheduleRoomCleanup(room) {
     }, delay);
 }
 
+async function clearStaleBracketRoomReference(room) {
+    if (!room?.bracketId || !room?.bracketMatchId) return;
+
+    const brackets = await readBrackets();
+    const bracket = brackets.find(item => item.id === room.bracketId);
+    if (!bracket || !Array.isArray(bracket.matches)) return;
+
+    const match = bracket.matches.find(item => item.id === room.bracketMatchId);
+    if (!match) return;
+    if (match.status === 'completed') return;
+    if (String(match.roomId || '') !== String(room.id || '')) return;
+
+    match.roomId = null;
+    await writeBrackets(brackets);
+}
+
+async function closeUnstartedRoom(room, message) {
+    if (!room) return;
+
+    const currentRoom = rooms.get(room.id);
+    if (!currentRoom) return;
+    if (currentRoom.battleState) return;
+
+    if (currentRoom.noOpponentTimeout) {
+        clearTimeout(currentRoom.noOpponentTimeout);
+        currentRoom.noOpponentTimeout = null;
+    }
+
+    if (currentRoom.unstartedTimeout) {
+        clearTimeout(currentRoom.unstartedTimeout);
+        currentRoom.unstartedTimeout = null;
+    }
+
+    if (currentRoom.countdownTimeout) {
+        clearTimeout(currentRoom.countdownTimeout);
+        currentRoom.countdownTimeout = null;
+    }
+
+    currentRoom.countdownInProgress = false;
+    currentRoom.countdownEndsAt = null;
+
+    sendToRoom(currentRoom, {
+        type: 'ROOM_CLOSED',
+        roomId: currentRoom.id,
+        message
+    });
+
+    rooms.delete(currentRoom.id);
+
+    try {
+        await clearStaleBracketRoomReference(currentRoom);
+    } catch (error) {
+        console.error('Failed to clear stale bracket room reference:', error);
+    }
+
+    broadcastActiveRooms();
+}
+
 function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     if (!room || room.battleState) return false;
     if (leftHandle !== room.host) return false;
@@ -1960,6 +2056,7 @@ function createRoomWithSharedLogic({
         endTimeout: null,
         cleanupTimeout: null,
         noOpponentTimeout: null,
+        unstartedTimeout: null,
         countdownTimeout: null,
         countdownEndsAt: null,
         countdownInProgress: false,
@@ -1977,21 +2074,22 @@ function createRoomWithSharedLogic({
 
     rooms.set(roomId, room);
 
-    room.noOpponentTimeout = setTimeout(() => {
+    room.noOpponentTimeout = setTimeout(async () => {
         const currentRoom = rooms.get(roomId);
         if (!currentRoom) return;
         if (currentRoom.battleState) return;
         if (getAssignedPlayersCount(currentRoom) >= 2) return;
 
-        sendToRoom(currentRoom, {
-            type: 'ROOM_CLOSED',
-            roomId: currentRoom.id,
-            message: 'Room closed: no opponent joined within 10 minutes.'
-        });
-
-        rooms.delete(roomId);
-        broadcastActiveRooms();
+        await closeUnstartedRoom(currentRoom, 'Room closed: no opponent joined within 10 minutes.');
     }, ROOM_NO_OPPONENT_TIMEOUT_MS);
+
+    room.unstartedTimeout = setTimeout(async () => {
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom) return;
+        if (currentRoom.battleState) return;
+
+        await closeUnstartedRoom(currentRoom, 'Room closed: match did not start in time. Please create a new room.');
+    }, ROOM_UNSTARTED_TIMEOUT_MS);
 
     generateValidationProblem()
         .then(problem => {
@@ -2472,7 +2570,10 @@ function handleJoinRoom(ws, data) {
         room.noOpponentTimeout = null;
     }
 
-    const joinedRole = (data.handle === room.host || data.handle === room.opponentHandle)
+    const joinedHandle = normalizeHandle(data.handle);
+    const hostHandle = normalizeHandle(room.host);
+    const opponentHandle = normalizeHandle(room.opponentHandle);
+    const joinedRole = (joinedHandle && (joinedHandle === hostHandle || joinedHandle === opponentHandle))
         ? 'player'
         : 'spectator';
 

@@ -1119,7 +1119,10 @@
             case 'PLAYER_JOINED':
                 updateRoomPlayers(data.players || [], { type: 'joined', handle: data.handle });
                 if (data.handle) {
-                    const joinedLabel = data.role === 'spectator' ? 'Spectator Joined' : 'Player Joined';
+                    const joinedRole = String(data.role || '').trim().toLowerCase();
+                    const joinedLabel = joinedRole === 'player'
+                        ? 'Player Joined'
+                        : 'Spectator Joined';
                     showDesktopNotification(`👋 ${joinedLabel}`, `${data.handle} joined the room`, false, true);
                 }
                 break;

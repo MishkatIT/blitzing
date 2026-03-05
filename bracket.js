@@ -254,8 +254,77 @@
         }
     }
 
+    // PATCH: Prevent drawAllTreeConnections from resetting scrollLeft
+    // PATCH: Persist bracket-tree scrollLeft using sessionStorage
     function drawAllTreeConnections() {
-        document.querySelectorAll('.bracket-tree').forEach(tree => drawTreeConnections(tree));
+        document.querySelectorAll('.bracket-tree').forEach((tree, idx) => {
+            // Use a unique key per bracket-tree (if multiple)
+            const key = 'bracketTreeScrollLeft_' + idx;
+            // Restore scrollLeft from sessionStorage if available
+            const saved = sessionStorage.getItem(key);
+            if (saved !== null) {
+                tree.scrollLeft = Number(saved);
+            }
+            // Listen for user scroll and persist
+            if (!tree._scrollListenerAttached) {
+                tree.addEventListener('scroll', () => {
+                    sessionStorage.setItem(key, tree.scrollLeft);
+                }, { passive: true });
+                // Mouse pointer-follow horizontal scroll
+                // Drag-to-scroll with grab cursor
+                let isDragging = false;
+                let dragStartX = 0;
+                let dragStartScroll = 0;
+                tree.style.cursor = 'grab';
+                tree.addEventListener('mousedown', function(e) {
+                    if (e.button !== 0) return; // Only left mouse button
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartScroll = tree.scrollLeft;
+                    tree.style.cursor = 'grabbing';
+                    tree.classList.add('dragging');
+                    e.preventDefault();
+                });
+                window.addEventListener('mousemove', function(e) {
+                    if (!isDragging) return;
+                    const dx = e.clientX - dragStartX;
+                    tree.scrollLeft = dragStartScroll - dx;
+                });
+                window.addEventListener('mouseup', function() {
+                    if (isDragging) {
+                        isDragging = false;
+                        tree.style.cursor = 'grab';
+                        tree.classList.remove('dragging');
+                    }
+                });
+
+                // Arrow key navigation
+                tree.setAttribute('tabindex', '0');
+                tree.addEventListener('keydown', function(e) {
+                    const scrollAmount = 80;
+                    if (e.key === 'ArrowLeft') {
+                        tree.scrollLeft -= scrollAmount;
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowRight') {
+                        tree.scrollLeft += scrollAmount;
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowUp') {
+                        tree.scrollTop -= scrollAmount;
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowDown') {
+                        tree.scrollTop += scrollAmount;
+                        e.preventDefault();
+                    }
+                });
+                tree._scrollListenerAttached = true;
+            }
+            drawTreeConnections(tree);
+            // After redraw, restore scrollLeft again
+            const savedAfter = sessionStorage.getItem(key);
+            if (savedAfter !== null) {
+                tree.scrollLeft = Number(savedAfter);
+            }
+        });
     }
 
     function decodeStoredValue(rawValue) {
@@ -363,26 +432,39 @@
         });
     }
 
-    function groupMatches(matches) {
+    function groupMatches(matches, bracketType = 'single-elimination') {
         const grouped = new Map();
+        let maxRound = 1;
         for (const match of matches || []) {
             const side = match.bracketSide || 'main';
-            const key = `${side}:R${match.round || 1}`;
+            const round = match.round || 1;
+            if (round > maxRound) maxRound = round;
+            const key = `${side}:R${round}`;
             if (!grouped.has(key)) {
                 grouped.set(key, {
                     side,
-                    round: match.round || 1,
-                    title: `${side === 'main' ? 'Main' : side === 'losers' ? 'Losers' : 'Final'} · Round ${match.round || 1}`,
+                    round,
                     matches: []
                 });
             }
             grouped.get(key).matches.push(match);
         }
 
-        return Array.from(grouped.values()).sort((a, b) => {
+        // Assign round titles
+        const roundNames = [null, 'Final', 'Semifinal', 'Quarterfinal', 'Round of 8', 'Round of 16', 'Round of 32', 'Round of 64'];
+        const result = Array.from(grouped.values()).sort((a, b) => {
             if (a.side !== b.side) return a.side.localeCompare(b.side);
             return a.round - b.round;
         });
+        result.forEach(group => {
+            if (bracketType === 'single-elimination' && group.side === 'main') {
+                const roundIdx = maxRound - group.round + 1;
+                group.title = roundNames[roundIdx] || `Round ${group.round}`;
+            } else {
+                group.title = `${group.side === 'main' ? 'Main' : group.side === 'losers' ? 'Losers' : 'Final'} · Round ${group.round}`;
+            }
+        });
+        return result;
     }
 
     function getRoundColorVars(round) {
@@ -662,7 +744,7 @@
 
         const ratingsMap = await fetchRatingsMap(getAllConcreteHandles([bracket]));
 
-        const groups = groupMatches(bracket.matches || []);
+        const groups = groupMatches(bracket.matches || [], bracket.type);
         const standingsHtml = renderStandingsPanel(bracket, ratingsMap);
         const html = groups.map(group => {
             const roundColors = getRoundColorVars(group.round);

@@ -379,10 +379,16 @@ textarea {
     grid-auto-flow: column;
     grid-auto-columns: max-content;
     column-gap: 44px;
-    align-items: flex-start;
+    align-items: center;
     overflow-x: auto;
     overflow-y: visible;
     padding: 10px 26px 16px 6px;
+    cursor: grab;
+}
+
+.bracket-tree.dragging {
+    cursor: grabbing !important;
+    user-select: none;
 }
 
 .standings-panel {
