@@ -1847,24 +1847,83 @@
             : allActiveRooms;
 
         if (rooms.length === 0) {
-            activeBlitzList.innerHTML = '<div class="live-loading"><span class="live-dot"></span><span>Live · No active rooms</span></div>';
+            activeBlitzList.innerHTML = `
+                <div class="active-blitz-empty-state">
+                    <div class="empty-bg-anim" aria-hidden="true">
+                        <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="90" cy="90" r="80" fill="#101624" opacity="0.13"/>
+                            <circle cx="90" cy="90" r="60" fill="#6ea8fe" opacity="0.07"/>
+                        </svg>
+                    </div>
+                    <div class="empty-illustration" aria-hidden="true">
+                        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="40" cy="40" r="38" fill="#151d2b" stroke="#252d3b" stroke-width="3"/>
+                            <ellipse cx="40" cy="55" rx="18" ry="6" fill="#232b3b"/>
+                            <rect x="28" y="28" width="24" height="16" rx="8" fill="#232b3b"/>
+                            <circle cx="36" cy="36" r="3" fill="#6ea8fe"/>
+                            <circle cx="44" cy="36" r="3" fill="#6ea8fe"/>
+                        </svg>
+                    </div>
+                    <div class="empty-title">No active rooms right now</div>
+                    <div class="empty-desc">Create a new room or join one using a Room ID.</div>
+                    <div class="empty-quote">“Opportunities don't happen. You create them.”<br><span>- Chris Grosser</span></div>
+                    <div class="empty-actions">
+                        <button class="primary-btn" onclick="document.getElementById('roomNameInput').focus()">Create Room</button>
+                        <button class="results-btn" onclick="document.getElementById('joinRoomIdInput').focus()">Join Room</button>
+                    </div>
+                    <ul class="empty-tips">
+                        <li>Tip: Invite friends to join your room using the Share button.</li>
+                        <li>Check the <a href="leaderboard.html">Leaderboard</a> or <a href="feedback.html">send feedback</a>.</li>
+                    </ul>
+                </div>
+            `;
             return;
         }
-        
+
+        // Show at most 10 rooms, rest are scrollable
+        const visibleRooms = rooms.slice(0, 10);
         let html = '';
-        rooms.forEach(room => {
+        visibleRooms.forEach(room => {
             html += `
-                <div class="blitz-room-card">
+                <div class="blitz-room-card" style="position:relative;">
+                    <button class="share-room-btn" title="Copy room code" style="position:absolute;top:10px;right:10px;font-size:0.78em;padding:2px 8px;min-width:unset;line-height:1.1;background:linear-gradient(180deg,#9dc4ff,#6ea8fe);color:#0a1220;border-radius:7px;border:1px solid #6ea8fe;cursor:pointer;z-index:2;" onclick="window.copyRoomShareLink('${room.id}', this)">Share</button>
                     <div class="blitz-room-info">
                         <h4>${room.name}</h4>
                         <p>ID: ${room.id} | 👥 ${room.assignedPlayers || room.players} joined</p>
                         <p>⏱️ ${room.duration} min | 🔄 ${room.interval}s | 📋 ${room.problems} problems</p>
                     </div>
-                    <button class="join-this-room-btn" onclick="window.joinRoom('${room.id}')">Join</button>
+                    <button class="join-this-room-btn" style="position:absolute;bottom:10px;right:10px;font-size:0.92em;padding:5px 14px;min-width:unset;line-height:1.2;z-index:2;" onclick="window.joinRoom('${room.id}')">Join</button>
                 </div>
             `;
         });
+        if (rooms.length > 10) {
+            html += `<div style="text-align:center;color:var(--muted);padding:8px 0 0 0;font-size:0.95em;">Showing 10 of ${rooms.length} active rooms. Use search to find more.</div>`;
+        }
         activeBlitzList.innerHTML = html;
+    }
+
+    // Add global function to copy room link
+    window.copyRoomShareLink = function(url, btn) {
+        if (!navigator.clipboard) {
+            // fallback
+            const input = document.createElement('input');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+        } else {
+            navigator.clipboard.writeText(url);
+        }
+        if (btn) {
+            const prev = btn.textContent;
+            btn.textContent = 'Room ID copied!';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = prev;
+                btn.disabled = false;
+            }, 1200);
+        }
     }
 
     function displayActiveRooms(rooms) {
@@ -2243,6 +2302,8 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'GET_ACTIVE_ROOMS' }));
         }
+            // Force full page reload to ensure CSS is reloaded
+            window.location.reload();
     }
 
     function stopMatchCountdown() {

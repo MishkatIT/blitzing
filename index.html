@@ -12,8 +12,8 @@
 <div class="cup-container">
     <div class="quick-nav">
         <a href="index.html" class="quick-nav-btn">Arena</a>
-        <a href="#roomControls" class="quick-nav-btn">Rooms</a>
-        <a href="#activeBlitzSection" class="quick-nav-btn">Active</a>
+        <!-- <a href="#roomControls" class="quick-nav-btn">Rooms</a> -->
+        <!-- <a href="#activeBlitzSection" class="quick-nav-btn">Active</a> -->
         <a href="bracket.html" class="quick-nav-btn">Bracket</a>
         <a href="headtohead.html" class="quick-nav-btn">Head-to-Head</a>
         <a href="profile.html" class="quick-nav-btn">Profile</a>
@@ -91,52 +91,53 @@
     </section>
 
     <section class="room-controls" id="roomControls">
-        <div class="create-room-section">
-            <h2>Create Room</h2>
-            <div class="room-form">
-                <input type="text" id="roomNameInput" placeholder="Room name">
-                <input type="text" id="opponentHandleInput" placeholder="Opponent Codeforces handle">
+        <section class="active-blitz-section" id="activeBlitzSection">
+            <div class="active-head">
+                <h2>Active Rooms</h2>
+                <input type="text" id="activeRoomsSearchInput" class="active-search-input" placeholder="Search by room name or ID">
+            </div>
+            <div class="blitz-list" id="activeBlitzList" style="max-height:520px;overflow-y:auto;">
+                <div class="live-loading"><span class="live-dot"></span><span>Live · Loading active rooms...</span></div>
+            </div>
+        </section>
+        <div class="room-side-panel">
+            <div class="join-room-section">
+                <h2>Join Room</h2>
+                <div class="room-form">
+                    <input type="text" id="joinRoomIdInput" placeholder="Room ID">
+                    <button id="joinRoomBtn" class="primary-btn">Join</button>
+                </div>
+            </div>
 
-                <div class="config-group">
-                    <h3>Match Setup</h3>
+            <div class="create-room-section">
+                <h2>Create Room</h2>
+                <div class="room-form">
+                    <input type="text" id="roomNameInput" placeholder="Room name">
+                    <input type="text" id="opponentHandleInput" placeholder="Opponent Codeforces handle">
 
-                    <div class="config-row">
-                        <label for="createDuration">Duration (minutes)</label>
-                        <input type="number" id="createDuration" min="2" max="60" value="40" step="1">
+                    <div class="config-group">
+                        <h3>Match Setup</h3>
+
+                        <div class="config-row">
+                            <label for="createDuration">Duration (minutes)</label>
+                            <input type="number" id="createDuration" min="2" max="60" value="40" step="1">
+                        </div>
+
+                        <div class="config-row">
+                            <label for="createInterval">Submission check interval (seconds)</label>
+                            <input type="number" id="createInterval" min="1" max="10" value="1" step="1">
+                        </div>
                     </div>
 
-                    <div class="config-row">
-                        <label for="createInterval">Submission check interval (seconds)</label>
-                        <input type="number" id="createInterval" min="1" max="10" value="1" step="1">
+                    <div class="config-group">
+                        <h3>Problems</h3>
+                        <div id="createProblemsList" class="problems-list"></div>
+                        <button type="button" class="add-problem-btn-small" id="createAddProblemBtn">Add Problem</button>
                     </div>
+
+                    <button id="createRoomBtn" class="primary-btn">Create Room</button>
                 </div>
-
-                <div class="config-group">
-                    <h3>Problems</h3>
-                    <div id="createProblemsList" class="problems-list"></div>
-                    <button type="button" class="add-problem-btn-small" id="createAddProblemBtn">Add Problem</button>
-                </div>
-
-                <button id="createRoomBtn" class="primary-btn">Create Room</button>
             </div>
-        </div>
-
-        <div class="join-room-section">
-            <h2>Join Room</h2>
-            <div class="room-form">
-                <input type="text" id="joinRoomIdInput" placeholder="Room ID">
-                <button id="joinRoomBtn" class="primary-btn">Join</button>
-            </div>
-        </div>
-    </section>
-
-    <section class="active-blitz-section" id="activeBlitzSection">
-        <div class="active-head">
-            <h2>Active Rooms</h2>
-            <input type="text" id="activeRoomsSearchInput" class="active-search-input" placeholder="Search by room name or ID">
-        </div>
-        <div class="blitz-list" id="activeBlitzList">
-            <div class="live-loading"><span class="live-dot"></span><span>Live · Loading active rooms...</span></div>
         </div>
     </section>
 

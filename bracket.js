@@ -703,16 +703,19 @@
         const firstChar = safeHandle.charAt(0);
         const restChars = safeHandle.slice(1);
         let handleHtml = `<span class="player-handle-max ${rankClass}">${safeHandle}</span>`;
-
         if (safeHandle.length > 1 && ultraLegendary) {
             handleHtml = `<span class="player-handle-ultra-first">${firstChar}</span><span class="player-handle-ultra-rest">${restChars}</span>`;
         } else if (safeHandle.length > 1 && legendary) {
             handleHtml = `<span class="player-handle-legendary-first">${firstChar}</span><span class="player-handle-legendary-rest">${restChars}</span>`;
         }
 
+        // Wrap handleHtml in a link to Codeforces profile
+        const cfProfileUrl = `https://codeforces.com/profile/${encodeURIComponent(safeHandle)}`;
+        const handleLink = `<a href="${cfProfileUrl}" class="player-handle-link" target="_blank" rel="noopener noreferrer">${handleHtml}</a>`;
+
         return `
             <span class="player-chip">
-                ${handleHtml}
+                ${handleLink}
                 <span class="player-current-rating">current rating ${currentText}</span>
             </span>
         `;
