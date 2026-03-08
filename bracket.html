@@ -65,12 +65,37 @@
                         </div>
                         <div>
                             <label for="defaultMatchInterval">Submission check interval (seconds)</label>
-                            <input id="defaultMatchInterval" type="number" min="1" max="10" value="1" step="1">
+                            <div style="position:relative;display:inline-block;">
+                                <input id="defaultMatchInterval" type="number" min="1" max="10" value="1" step="1" readonly style="padding-right:24px;cursor:not-allowed;">
+                                <span id="intervalLockIcon" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:1.1em;color:#b99;" title="Restricted">
+                                    <span style="cursor:not-allowed;display:inline-block;width:1.2em;">&#128274;</span>
+                                </span>
+                            </div>
+                        <script>
+                        // Show lock icon on hover for readonly interval input
+                        document.addEventListener('DOMContentLoaded', function() {
+                            var intervalInput = document.getElementById('defaultMatchInterval');
+                            var lockIcon = document.getElementById('intervalLockIcon');
+                            if (intervalInput && lockIcon) {
+                                function showLock() { lockIcon.style.display = 'inline'; }
+                                function hideLock(e) {
+                                    // Only hide if not hovering input or icon
+                                    if (!intervalInput.matches(':hover') && !lockIcon.matches(':hover')) {
+                                        lockIcon.style.display = 'none';
+                                    }
+                                }
+                                intervalInput.addEventListener('mouseenter', showLock);
+                                intervalInput.addEventListener('mouseleave', hideLock);
+                                lockIcon.addEventListener('mouseenter', showLock);
+                                lockIcon.addEventListener('mouseleave', hideLock);
+                            }
+                        });
+                        </script>
                         </div>
                     </div>
 
                     <div class="config-group">
-                        <label>Problems (same as normal room)</label>
+                        <label>Problems <span id="bracketProblemsCount" style="font-weight:normal;color:#888;font-size:0.95em;"></span></label>
                         <div id="bracketProblemsList" class="problems-list"></div>
                         <button type="button" class="small-btn" id="bracketAddProblemBtn">Add Problem</button>
                     </div>
@@ -104,6 +129,8 @@
             <div id="savedBracketsList" class="saved-list"></div>
         </section>
 
+        <div id="cf-cache-status" style="font-size:12px;color:#666;margin:12px 0;">CF cache: loading…</div>
+
         <div class="password-modal" id="userProfileModal">
             <div class="password-content user-profile-content">
                 <h2>User Profile</h2>
@@ -127,6 +154,7 @@
         </footer>
     </div>
 
+    <script src="cf-user-info.js"></script>
     <script src="global-profile-presence.js"></script>
     <script src="quick-nav-overflow.js"></script>
     <script src="floating-scrollbar.js"></script>

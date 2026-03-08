@@ -274,9 +274,22 @@
             const p1Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p1Result)).join('');
             const p2Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p2Result)).join('');
 
+
+            // At match start, both players should be shown as rank 1
+            let p1Standing = '#1';
+            let p2Standing = '#1';
+            // If the match is finished, show actual standings
             const standing = getStandingFromResult(result);
-            const p1Standing = standing.label === 'P1' ? '#1' : standing.label === 'P2' ? '#2' : '#1';
-            const p2Standing = standing.label === 'P2' ? '#1' : standing.label === 'P1' ? '#2' : '#1';
+            if (standing.label === 'P1') {
+                p1Standing = '#1';
+                p2Standing = '#2';
+            } else if (standing.label === 'P2') {
+                p1Standing = '#2';
+                p2Standing = '#1';
+            } else if (standing.label === 'TIE') {
+                p1Standing = '#1';
+                p2Standing = '#1';
+            }
 
             return `
                 <h3 class="modal-subtitle">Standings</h3>
@@ -560,6 +573,7 @@
                 return;
             }
 
+
             const orderedResults = [...filtered].sort((a, b) => {
                 const aNum = Number(a.blitzNumber) || 0;
                 const bNum = Number(b.blitzNumber) || 0;
@@ -582,19 +596,33 @@
                 const p1Norm = String(r?.player1?.handle || '').toLowerCase();
                 const p2Norm = String(r?.player2?.handle || '').toLowerCase();
 
+                // Determine display order: winner always first (left/top), other second (right/bottom)
+                let leftPlayer = r.player1;
+                let rightPlayer = r.player2;
+                let leftScore = r.player1.score;
+                let rightScore = r.player2.score;
+                if (winnerNorm && winnerNorm !== 'tie') {
+                    if (winnerNorm === p2Norm) {
+                        leftPlayer = r.player2;
+                        rightPlayer = r.player1;
+                        leftScore = r.player2.score;
+                        rightScore = r.player1.score;
+                    }
+                }
+
                 let winnerHtml = '<span class="standing-badge standing-none">—</span>';
                 if (winnerNorm === 'tie') {
                     winnerHtml = '<span class="standing-badge standing-tie">TIE</span>';
-                } else if (winnerNorm && winnerNorm === p1Norm) {
+                } else if (winnerNorm && winnerNorm === String(leftPlayer.handle).toLowerCase()) {
                     winnerHtml = `
-                        <a href="#" data-handle="${r.player1.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(r.player1.rank)};">
-                            ${r.player1.handle}
+                        <a href="#" data-handle="${leftPlayer.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(leftPlayer.rank)};">
+                            ${leftPlayer.handle}
                         </a>
                     `;
-                } else if (winnerNorm && winnerNorm === p2Norm) {
+                } else if (winnerNorm && winnerNorm === String(rightPlayer.handle).toLowerCase()) {
                     winnerHtml = `
-                        <a href="#" data-handle="${r.player2.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(r.player2.rank)};">
-                            ${r.player2.handle}
+                        <a href="#" data-handle="${rightPlayer.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(rightPlayer.rank)};">
+                            ${rightPlayer.handle}
                         </a>
                     `;
                 } else if (winnerRaw) {
@@ -609,17 +637,17 @@
                         <span class="timestamp">${formattedTime}</span>
                     </td>
                     <td>
-                        <a href="#" data-handle="${r.player1.handle}" class="player-link stats-user-link" style="color: ${getRankColor(r.player1.rank)};">
-                            ${r.player1.handle}
+                        <a href="#" data-handle="${leftPlayer.handle}" class="player-link stats-user-link" style="color: ${getRankColor(leftPlayer.rank)};">
+                            ${leftPlayer.handle}
                         </a>
                     </td>
-                    <td><strong>${r.player1.score}</strong></td>
+                    <td><strong>${leftScore}</strong></td>
                     <td>
-                        <a href="#" data-handle="${r.player2.handle}" class="player-link stats-user-link" style="color: ${getRankColor(r.player2.rank)};">
-                            ${r.player2.handle}
+                        <a href="#" data-handle="${rightPlayer.handle}" class="player-link stats-user-link" style="color: ${getRankColor(rightPlayer.rank)};">
+                            ${rightPlayer.handle}
                         </a>
                     </td>
-                    <td><strong>${r.player2.score}</strong></td>
+                    <td><strong>${rightScore}</strong></td>
                     <td>${winnerHtml}</td>
                     <td><button class="details-btn" onclick='showDetails(${JSON.stringify(r).replace(/'/g, "\\'")})'>View</button></td>
                 </tr>

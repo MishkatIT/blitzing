@@ -133,8 +133,11 @@
         allProfilesList.innerHTML = handles.map(handle => {
             const handleNorm = normalize(handle);
             const activeClass = normalize(handle) === selectedNorm ? ' active' : '';
-            return `<a class="profile-chip${activeClass}" data-handle-norm="${handleNorm}" href="/${encodeURIComponent(handle)}">${handle}</a>`;
+            let handleHtml = window.CFUserInfo ? window.CFUserInfo.renderHandleHtml(handle) : handle;
+            return `<a class="profile-chip${activeClass}" data-handle-norm="${handleNorm}" href="/${encodeURIComponent(handle)}">${handleHtml}</a>`;
         }).join('');
+        // Track all handles to ensure info is loaded
+        if (window.CFUserInfo) window.CFUserInfo.trackHandles(handles);
     }
 
     function scrollToListedHandle(handle) {
@@ -163,7 +166,24 @@
         });
     }
 
+    // Use centralized CFUserInfo for Codeforces user info
     async function fetchUserProfileDetails(handle) {
+        // Prefer centralized CFUserInfo if available
+        if (window.CFUserInfo) {
+            window.CFUserInfo.trackHandles([handle]);
+            let info = window.CFUserInfo.getInfo(handle);
+            let waited = 0;
+            while ((!info || info.rating === null) && waited < 2000) {
+                await new Promise(res => setTimeout(res, 100));
+                waited += 100;
+                info = window.CFUserInfo.getInfo(handle);
+            }
+            if (info && (info.handle || info.rating !== null || info.maxRating !== null)) {
+                return info;
+            }
+        }
+
+        // Fallback: fetch directly from Codeforces API
         try {
             const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
             const data = await response.json();

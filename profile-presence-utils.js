@@ -64,6 +64,19 @@
     }
 
     async function fetchUserProfileDetails(handle) {
+        // Prefer centralized CFUserInfo if available
+        if (window.CFUserInfo) {
+            window.CFUserInfo.trackHandles([handle]);
+            let info = window.CFUserInfo.getInfo(handle);
+            let waited = 0;
+            while ((!info || info.rating === null) && waited < 2000) {
+                await new Promise(res => setTimeout(res, 100));
+                waited += 100;
+                info = window.CFUserInfo.getInfo(handle);
+            }
+            if (info && (info.handle || info.rating !== null || info.maxRating !== null)) return info;
+        }
+
         try {
             const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
             const data = await response.json();

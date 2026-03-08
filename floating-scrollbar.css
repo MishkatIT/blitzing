@@ -186,6 +186,9 @@ body::-webkit-scrollbar {
 }
 
 .user-profile-logout-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
     background: linear-gradient(180deg, #ff9a9a, #ff7d7d);
     color: #230505;
     border-color: #ff7d7d;

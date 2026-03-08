@@ -371,6 +371,9 @@ input {
 }
 
 .user-profile-logout-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
     border: 1px solid #ff7d7d;
     background: linear-gradient(180deg, #ff9a9a, #ff7d7d);
     color: #230505;

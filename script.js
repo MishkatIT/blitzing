@@ -1,9 +1,44 @@
+console.log('[CLIENT] script.js loaded');
+// Robust event delegation for Start Match button
+document.addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'startBattleBtn') {
+        console.log('[CLIENT] Delegated handler: Start Match button CLICK HANDLER FIRED');
+        console.log('[CLIENT] DEBUG before eligibility check:', { currentRoom: window.currentRoom, userHandle: window.userHandle });
+        if (!window.currentRoom || !window.userHandle) {
+            if (window.userHandle && !window.currentRoom) {
+                alert('You are not eligible to start the match. (Missing room).\n\nIt looks like you are logged in, but not joined to a room. Please rejoin the room or reload the page.');
+                console.error('[CLIENT] Start Match click: userHandle is set but currentRoom is null. This usually means the client did not rejoin the room after reload or lost connection.');
+            } else {
+                alert('You are not eligible to start the match. (Missing room or handle)');
+            }
+            console.warn('[CLIENT] Start Match click: missing currentRoom or userHandle', { currentRoom: window.currentRoom, userHandle: window.userHandle });
+            console.log('[CLIENT] EARLY RETURN: missing currentRoom or userHandle', { currentRoom: window.currentRoom, userHandle: window.userHandle });
+            return;
+        }
+        if (!window.ws || window.ws.readyState !== WebSocket.OPEN) {
+            alert('Connection not ready. Please wait for WebSocket to connect.');
+            console.warn('[CLIENT] Start Match click: WebSocket not open', { ws: window.ws });
+            console.log('[CLIENT] EARLY RETURN: WebSocket not open', { ws: window.ws });
+            return;
+        }
+        const normalizedHandle = (window.userHandle || '').trim().toLowerCase();
+        console.log('[CLIENT] About to send PLAYER_READY_TO_START', { currentRoom: window.currentRoom, userHandle: window.userHandle, normalizedHandle });
+        window.ws.send(JSON.stringify({
+            type: 'PLAYER_READY_TO_START',
+            roomId: window.currentRoom,
+            handle: normalizedHandle
+        }));
+        // Do not update button state here; let server broadcast control the UI
+    }
+});
 (function() {
     // State
     const ADMIN_HANDLES = new Set(['else_if_tridib21', 'mishkatit']);
     let userHandle = '';
+        window.userHandle = userHandle;
     let playersValidated = false;
     let currentRoom = null;
+        window.currentRoom = currentRoom;
     let isHost = false;
     let ws = null;
     let reconnectAttempts = 0;
@@ -179,9 +214,13 @@
     const leaderboard = document.getElementById('leaderboard');
     const arenaPanel = document.getElementById('arenaPanel');
     const startBattleBtn = document.getElementById('startBattleBtn');
-    const startP1HandleInput = document.getElementById('startP1HandleInput');
-    const startP2HandleInput = document.getElementById('startP2HandleInput');
+    console.log('[CLIENT] startBattleBtn:', startBattleBtn);
+    const startP1Handle = document.getElementById('startP1Handle');
+    const startP2Handle = document.getElementById('startP2Handle');
+    const startP1Avatar = document.getElementById('startP1Avatar');
+    const startP2Avatar = document.getElementById('startP2Avatar');
     const cancelGameBtn = document.getElementById('cancelGameBtn');
+    const startBattleVSBlock = document.getElementById('startBattleVSBlock');
     
     // Battle DOM elements
     const p1HandleSpan = document.getElementById('p1Handle');
@@ -229,10 +268,90 @@
     const defaultGenerateHandleVerificationBtnLabel = generateHandleVerificationBtn?.textContent || 'Generate Problem';
     let handleVerificationGenerationInFlight = false;
 
+    // Make the whole VS player box behave like the inner handle link
+    function wirePlayerBoxToHandle(handleAnchorElem) {
+        if (!handleAnchorElem) return;
+        try {
+            const box = handleAnchorElem.closest('.vs-player-box');
+            if (!box) return;
+            // ensure pointer cursor (in case some contexts override CSS)
+            box.style.cursor = 'pointer';
+            box.addEventListener('click', function (ev) {
+                // if the click originated on an actual link (e.g., the handle anchor itself), allow default
+                if (ev.target && ev.target.closest && ev.target.closest('a')) return;
+                const href = handleAnchorElem.getAttribute && handleAnchorElem.getAttribute('href');
+                if (href && href !== '#') {
+                    window.open(href, '_blank');
+                }
+            });
+        } catch (e) {
+            console.warn('[CLIENT] wirePlayerBoxToHandle error', e);
+        }
+    }
+
+    // Wire existing handle anchors (main arena and start-battle block)
+    wirePlayerBoxToHandle(p1HandleSpan);
+    wirePlayerBoxToHandle(p2HandleSpan);
+    wirePlayerBoxToHandle(startP1Handle);
+    wirePlayerBoxToHandle(startP2Handle);
+
+    // Apply CFUserInfo (canonical handle, colored HTML, and color styling) to player boxes
+    function applyCFInfoToPlayerBox(handleAnchorElem) {
+        if (!handleAnchorElem) return;
+        try {
+            const box = handleAnchorElem.closest('.vs-player-box');
+            const avatar = box ? box.querySelector('.vs-player-avatar') : null;
+            // derive a handle candidate
+            let raw = handleAnchorElem.getAttribute('data-handle') || handleAnchorElem.textContent || '';
+            try { raw = decodeURIComponent(raw); } catch (e) { /* ignore */ }
+            const handle = String(raw || '').trim();
+            if (!handle) return;
+            if (window.CFUserInfo) {
+                window.CFUserInfo.trackHandles([handle]);
+                const info = window.CFUserInfo.getInfo(handle) || {};
+                const canonical = info.handle || handle;
+                // Render colored HTML using CFUserInfo (falls back internally if missing)
+                handleAnchorElem.innerHTML = window.CFUserInfo.renderHandleHtml(canonical);
+                handleAnchorElem.setAttribute('data-handle', encodeURIComponent(canonical));
+                handleAnchorElem.href = `https://codeforces.com/profile/${encodeURIComponent(canonical)}`;
+                handleAnchorElem.setAttribute('target', '_blank');
+                handleAnchorElem.setAttribute('rel', 'noopener noreferrer');
+                // Apply visual color cues: border and avatar background
+                if (box && info.color) box.style.setProperty('--player-border', info.color);
+                if (avatar && info.color) avatar.style.background = info.color;
+            } else {
+                // Fallback: ensure href uses current text value
+                const txt = handleAnchorElem.textContent && handleAnchorElem.textContent.trim();
+                if (txt) handleAnchorElem.href = `https://codeforces.com/profile/${encodeURIComponent(txt)}`;
+            }
+        } catch (e) {
+            console.warn('[CLIENT] applyCFInfoToPlayerBox error', e);
+        }
+    }
+
+    // Initial application
+    applyCFInfoToPlayerBox(p1HandleSpan);
+    applyCFInfoToPlayerBox(p2HandleSpan);
+    applyCFInfoToPlayerBox(startP1Handle);
+    applyCFInfoToPlayerBox(startP2Handle);
+
+    // Subscribe for updates from CFUserInfo so cards refresh when data arrives
+    if (window.CFUserInfo && typeof window.CFUserInfo.subscribe === 'function') {
+        window.CFUserInfo.subscribe((updatedHandles) => {
+            // Re-apply to all four anchors (cheap and simple)
+            applyCFInfoToPlayerBox(p1HandleSpan);
+            applyCFInfoToPlayerBox(p2HandleSpan);
+            applyCFInfoToPlayerBox(startP1Handle);
+            applyCFInfoToPlayerBox(startP2Handle);
+        });
+    }
+
     function setGenerateHandleButtonState({ disabled, label }) {
         if (!generateHandleVerificationBtn) return;
         generateHandleVerificationBtn.disabled = !!disabled;
-        generateHandleVerificationBtn.textContent = label || defaultGenerateHandleVerificationBtnLabel;
+        if (generateHandleVerificationBtn) {
+            generateHandleVerificationBtn.textContent = label || defaultGenerateHandleVerificationBtnLabel;
+        }
     }
 
     const API_BASE_URL = window.location.origin;
@@ -415,6 +534,8 @@
                 }
                 if (String(userHandle || '').trim()) {
                     userHandle = '';
+                            window.userHandle = userHandle;
+                        window.userHandle = userHandle;
                     userAvatarUrl = '';
                     playersValidated = false;
                     userHandleInput.value = '';
@@ -429,6 +550,9 @@
             const localHandle = String(userHandle || '').trim();
             if (!localHandle || localHandle.toLowerCase() !== serverHandle.toLowerCase()) {
                 userHandle = serverHandle;
+                        window.userHandle = userHandle;
+                    window.userHandle = userHandle;
+                    window.currentRoom = currentRoom;
                 userAvatarUrl = '';
                 userHandleInput.value = serverHandle;
             }
@@ -536,7 +660,7 @@
             loggedInfo.removeAttribute('role');
             loggedInfo.removeAttribute('tabindex');
             loggedInfo.removeAttribute('title');
-            loggedInfo.textContent = '';
+            if (loggedInfo) loggedInfo.textContent = '';
             loggedInfo.style.display = 'none';
             if (setHandleBtn) setHandleBtn.style.display = 'inline-flex';
             syncAdminOnlyUiVisibility();
@@ -692,6 +816,18 @@
     }
 
     async function fetchUserProfileDetails(handle) {
+        if (window.CFUserInfo) {
+            window.CFUserInfo.trackHandles([handle]);
+            let info = window.CFUserInfo.getInfo(handle);
+            let waited = 0;
+            while ((!info || info.rating === null) && waited < 2000) {
+                await new Promise(res => setTimeout(res, 100));
+                waited += 100;
+                info = window.CFUserInfo.getInfo(handle);
+            }
+            if (info && (info.handle || info.rating !== null || info.maxRating !== null)) return info;
+        }
+
         try {
             const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
             const data = await response.json();
@@ -750,7 +886,7 @@
 
     function openUserProfileModalLoading() {
         if (!userProfileModal || !userProfileBody) return;
-        userProfileBody.textContent = 'Loading profile...';
+        if (userProfileBody) userProfileBody.textContent = 'Loading profile...';
         if (userProfileLogoutBtn) {
             userProfileLogoutBtn.style.display = 'none';
         }
@@ -760,7 +896,7 @@
     function renderUserProfileModal(profile, siteStats, presence) {
         if (!userProfileBody) return;
         if (!profile) {
-            userProfileBody.textContent = 'Could not load profile right now.';
+            if (userProfileBody) userProfileBody.textContent = 'Could not load profile right now.';
             return;
         }
 
@@ -828,7 +964,7 @@
                 ${avatar ? `<img src="${avatar}" alt="${handle}" class="user-profile-avatar">` : ''}
                 <div class="user-profile-head-info">
                     <div class="user-profile-handle-row">
-                        <div class="user-profile-handle ${handleRankClass}">${handle}</div>
+                        <div class="user-profile-handle ${handleRankClass}">${window.CFUserInfo ? window.CFUserInfo.renderHandleHtml(handle) : escapeHtml(handle)}</div>
                     </div>
                     <div class="user-presence ${statusClass}"><span class="presence-dot"></span>${statusText}</div>
                     <div class="user-profile-rank">${rank} · max ${maxRank}</div>
@@ -907,6 +1043,7 @@
         const persistedAvatar = storageGetItem(getUserAvatarStorageKey()) || '';
         if (persistedHandle) {
             userHandle = persistedHandle;
+                window.userHandle = userHandle;
             userAvatarUrl = persistedAvatar;
             playersValidated = true;
             userHandleInput.value = userHandle;
@@ -918,9 +1055,12 @@
             try {
                 const state = JSON.parse(saved);
                 userHandle = state.userHandle || userHandle;
+                    window.userHandle = userHandle;
                 userAvatarUrl = state.userAvatarUrl || userAvatarUrl;
                 playersValidated = !!userHandle;
                 currentRoom = state.currentRoom || null;
+                    window.currentRoom = currentRoom;
+                    console.log('[CLIENT] DEBUG set currentRoom:', currentRoom);
                 isHost = state.isHost || false;
                 roomData = state.roomData || null;
                 
@@ -1006,7 +1146,7 @@
     // Clear saved state
     function clearSavedState() {
         storageRemoveItem('blitzRoomState');
-        clearBattleRuntimeState();
+        // Do NOT clearBattleRuntimeState here, so runtime state (including standing timestamp) persists across leave/re-enter
     }
 
     function isAdminHandle(handle) {
@@ -1015,6 +1155,7 @@
 
     // Reconnect to room
     function reconnectToRoom() {
+        window.reconnectToRoom = reconnectToRoom;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             connectWebSocket();
         } else {
@@ -1029,6 +1170,7 @@
     // WebSocket connection
     function connectWebSocket() {
         ws = new WebSocket(WS_URL);
+        window.ws = ws;
         
         ws.onopen = () => {
             console.log('WebSocket connected');
@@ -1076,6 +1218,8 @@
         switch(data.type) {
             case 'ROOM_CREATED':
                 currentRoom = data.roomId;
+                window.currentRoom = currentRoom;
+                console.log('[CLIENT] DEBUG set currentRoom (ROOM_CREATED):', currentRoom);
                 isHost = true;
                 roomData = {
                     id: data.roomId,
@@ -1096,6 +1240,8 @@
                 
             case 'ROOM_JOINED':
                 currentRoom = data.roomId;
+                window.currentRoom = currentRoom;
+                console.log('[CLIENT] DEBUG set currentRoom (ROOM_JOINED):', currentRoom);
                 isHost = data.isHost;
                 roomData = {
                     id: data.roomId,
@@ -1117,7 +1263,20 @@
                 break;
 
             case 'PLAYER_JOINED':
+                console.log('PLAYER_JOINED received', data);
                 updateRoomPlayers(data.players || [], { type: 'joined', handle: data.handle });
+                // Also re-render the full room UI for all clients
+                if (typeof joinRoomUI === 'function' && data.roomId && data.roomName && data.players) {
+                    joinRoomUI(
+                        data.roomId,
+                        data.roomName,
+                        data.players,
+                        data.duration,
+                        data.interval,
+                        data.problems,
+                        data.validationProblem
+                    );
+                }
                 if (data.handle) {
                     const joinedRole = String(data.role || '').trim().toLowerCase();
                     const joinedLabel = joinedRole === 'player'
@@ -1129,6 +1288,8 @@
                 
             case 'REJOIN_SUCCESS':
                 currentRoom = data.roomId;
+                window.currentRoom = currentRoom;
+                console.log('[CLIENT] DEBUG set currentRoom (REJOIN_SUCCESS):', currentRoom);
                 isHost = data.isHost;
                 roomData = data.roomData;
                 joinRoomUI(
@@ -1152,6 +1313,8 @@
             case 'JOIN_ERROR':
                 alert('Error joining room: ' + data.message);
                 currentRoom = null;
+                window.currentRoom = currentRoom;
+                console.log('[CLIENT] DEBUG set currentRoom (JOIN_ERROR):', currentRoom);
                 isHost = false;
                 roomData = null;
                 clearSavedState();
@@ -1172,12 +1335,14 @@
                 break;
                 
             case 'BATTLE_STARTED':
+                console.log('[CLIENT] BATTLE_STARTED received', data);
                 stopMatchCountdown();
                 showDesktopNotification('🚀 Match Started', 'Blitz match has started for both players.', false, true);
                 startBattleFromHost(data.battleState);
                 break;
 
             case 'MATCH_COUNTDOWN_STARTED':
+                console.log('[CLIENT] MATCH_COUNTDOWN_STARTED received', data);
                 startMatchCountdown(data.startsAt);
                 break;
 
@@ -1197,35 +1362,83 @@
                 break;
 
             case 'VALIDATION_STATUS': {
+                console.log('[CLIENT] VALIDATION_STATUS received', data);
                 const pair = data.pair || [];
                 const statuses = data.statuses || {};
                 if (pair.length >= 2) {
-                    startP1HandleInput.value = pair[0];
-                    startP2HandleInput.value = pair[1];
-                    startP1HandleInput.disabled = true;
-                    startP2HandleInput.disabled = true;
+                    // ...existing code...
+                    if (startP1Handle) {
+                        if (pair[0] && pair[0] !== 'Waiting') {
+                            if (window.CFUserInfo) {
+                                window.CFUserInfo.trackHandles([pair[0]]);
+                                const info = window.CFUserInfo.getInfo(pair[0]) || {};
+                                const display = info.handle || pair[0];
+                                startP1Handle.innerHTML = window.CFUserInfo.renderHandleHtml(display);
+                                startP1Handle.href = `https://codeforces.com/profile/${encodeURIComponent(display)}`;
+                                startP1Handle.setAttribute('data-handle', encodeURIComponent(pair[0]));
+                                startP1Handle.setAttribute('target', '_blank');
+                                startP1Handle.setAttribute('rel', 'noopener noreferrer');
+                            } else {
+                                startP1Handle.textContent = pair[0];
+                                startP1Handle.href = `https://codeforces.com/profile/${encodeURIComponent(pair[0])}`;
+                            }
+                        } else {
+                            startP1Handle.textContent = pair[0];
+                            startP1Handle.href = '#';
+                        }
+                    }
+                    if (startP2Handle) {
+                        if (pair[1] && pair[1] !== 'Waiting') {
+                            if (window.CFUserInfo) {
+                                window.CFUserInfo.trackHandles([pair[1]]);
+                                const info2 = window.CFUserInfo.getInfo(pair[1]) || {};
+                                const display2 = info2.handle || pair[1];
+                                startP2Handle.innerHTML = window.CFUserInfo.renderHandleHtml(display2);
+                                startP2Handle.href = `https://codeforces.com/profile/${encodeURIComponent(display2)}`;
+                                startP2Handle.setAttribute('data-handle', encodeURIComponent(pair[1]));
+                                startP2Handle.setAttribute('target', '_blank');
+                                startP2Handle.setAttribute('rel', 'noopener noreferrer');
+                            } else {
+                                startP2Handle.textContent = pair[1];
+                                startP2Handle.href = `https://codeforces.com/profile/${encodeURIComponent(pair[1])}`;
+                            }
+                        } else {
+                            startP2Handle.textContent = pair[1];
+                            startP2Handle.href = '#';
+                        }
+                    }
 
-                    const p1Ok = !!statuses[pair[0]];
-                    const p2Ok = !!statuses[pair[1]];
-                    validationStatusText.textContent = `${pair[0]}: ${p1Ok ? 'CE ✅' : 'CE ⏳'} | ${pair[1]}: ${p2Ok ? 'CE ✅' : 'CE ⏳'} · ${data.message || ''}`;
+                    // Normalize handles for readiness check
+                    let myHandle = (userHandle || '').trim().toLowerCase();
+                    let pairLower = pair.map(h => (h || '').trim().toLowerCase());
+                    let statusesLower = {};
+                    Object.keys(statuses).forEach(h => {
+                        statusesLower[(h || '').trim().toLowerCase()] = statuses[h];
+                    });
+                    // Debug log after all variables are initialized
+                    console.log('[CLIENT] DEBUG myHandle:', myHandle, 'pairLower:', pairLower, 'statusesLower:', statusesLower);
+                    let iAmInPair = pairLower.includes(myHandle);
+                    startBattleVSBlock.style.display = 'block';
+                    if (iAmInPair) {
+                        startBattleBtn.disabled = !!statusesLower[myHandle];
+                        if (startBattleBtn) startBattleBtn.textContent = statusesLower[myHandle] ? 'Ready ✔️' : 'Start Match';
+                    } else {
+                        startBattleBtn.disabled = true;
+                        if (startBattleBtn) startBattleBtn.textContent = 'Waiting for players';
+                    }
+
+                    // Show status for both players
+                    const p1Ok = !!statusesLower[pairLower[0]];
+                    const p2Ok = !!statusesLower[pairLower[1]];
+                    if (validationStatusText) validationStatusText.textContent = `${pair[0]}: ${p1Ok ? 'Ready ✅' : 'Not Ready'} | ${pair[1]}: ${p2Ok ? 'Ready ✅' : 'Not Ready'} · ${data.message || ''}`;
                 } else {
-                    validationStatusText.textContent = data.message || 'Waiting for match creator and selected opponent to be connected.';
+                    startBattleVSBlock.style.display = 'none';
+                    if (validationStatusText) {
+                        validationStatusText.textContent = data.message || 'Waiting for match creator and selected opponent to be connected.';
+                    }
                 }
                 break;
             }
-
-            case 'BATTLE_FINISHED':
-                if (timerEndVerificationInProgress) {
-                    matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
-                    break;
-                }
-                if (battleActive && !problemLocked && currentProblem && hasAnyPendingOnCurrentProblem()) {
-                    matchStatusText.textContent = '⏱️ Pending queued verdicts detected. Checking before final result...';
-                    verifyFinalSubmissionsAtTimerEnd().catch(() => {});
-                    break;
-                }
-                stopBattle(true);
-                break;
 
             case 'PROBLEM_SOLVED': {
                 const solveKey = data.solveKey || `${data.problemId}:${data.solverHandle}`;
@@ -1234,12 +1447,28 @@
                     showDesktopNotification('✅ Problem Solved!', `${data.solverHandle} solved Problem ${data.problemNumber}!`, false, true);
                 }
 
+                // Update solvedAtSec if provided
+                if (typeof data.solvedAtSec === 'number' && data.solverHandle && data.problemNumber) {
+                    const problemIndex = Number(data.problemNumber) - 1;
+                    if (problemIndex >= 0) {
+                        if (data.solverHandle === player1Handle && problemResults.p1 && problemResults.p1[problemIndex]) {
+                            problemResults.p1[problemIndex].solvedAtSec = data.solvedAtSec;
+                        } else if (data.solverHandle === player2Handle && problemResults.p2 && problemResults.p2[problemIndex]) {
+                            problemResults.p2[problemIndex].solvedAtSec = data.solvedAtSec;
+                        }
+                    }
+                }
+
                 if (battleActive && !problemLocked) {
                     const solvedProblemNumber = Number(data.problemNumber) || 0;
                     const isCurrentProblem = solvedProblemNumber === currentProblemIndex;
                     if (isCurrentProblem) {
                         checkSubmissions().catch(() => {});
                     }
+                }
+                // Always update clickable state after problem is solved
+                if (typeof updateCurrentProblemDetailsUI === 'function') {
+                    updateCurrentProblemDetailsUI();
                 }
                 break;
             }
@@ -1260,13 +1489,30 @@
                                 apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
                             }
                         });
-                    } else if (breakActive && currentProblemIndex === nextProblemIndex) {
+                    } else if (breakActive && currentProblemIndex + 1 === nextProblemNumber) {
+                        console.log('[NEXT_PROBLEM_READY] Setting queuedNextProblem', {
+                            breakActive,
+                            currentProblemIndex,
+                            nextProblemNumber,
+                            dataProblem: data.problem
+                        });
                         queuedNextProblem = data.problem;
                     }
+
+                    console.log('[NEXT_PROBLEM_READY] Message handled', {
+                        breakActive,
+                        currentProblemIndex,
+                        nextProblemNumber,
+                        queuedNextProblem
+                    });
 
                     showDesktopNotification('🆕 New Problem Ready', `Problem ${nextProblemNumber} generated and ready for next round.`, false, true);
 
                     saveBattleRuntimeState();
+                }
+                // Always update clickable state after next problem is loaded
+                if (typeof updateCurrentProblemDetailsUI === 'function') {
+                    updateCurrentProblemDetailsUI();
                 }
                 break;
             }
@@ -1286,7 +1532,57 @@
     }
 
     function restoreBattleState(state) {
+                        function updateCurrentProblemDetailsUI() {
+                            if (!currentProblem) return;
+                            const problemPoints = selectedProblems[Math.max(0, currentProblemIndex - 1)]?.points || currentProblem.points || 500;
+                            if (probNameSpan) probNameSpan.textContent = currentProblem.name;
+                            if (probPointsSpan) probPointsSpan.textContent = problemPoints;
+                            if (probRatingSpan) probRatingSpan.textContent = `Rating: ${currentProblem.rating}`;
+                            problemUrl.href = currentProblem.url;
+                            // Always fully reset clickable state and style
+                            problemUrl.classList.remove('not-allowed');
+                            problemUrl.style.pointerEvents = 'auto';
+                            problemUrl.style.opacity = '1';
+                            if (problemUrl._blockClickHandler) {
+                                problemUrl.removeEventListener('click', problemUrl._blockClickHandler);
+                                problemUrl._blockClickHandler = null;
+                            }
+                            // Check if current problem is solved by either player
+                            const index = Math.max(0, Number(currentProblemIndex || 0) - 1);
+                            const p1Solved = problemResults?.p1?.[index]?.solved;
+                            const p2Solved = problemResults?.p2?.[index]?.solved;
+                            if (p1Solved || p2Solved) {
+                                // Show who solved and use green solved-flash style
+                                let solver = null;
+                                if (p1Solved && problemResults?.p1?.[index]?.solvedAtSec != null) solver = player1Handle;
+                                if (p2Solved && problemResults?.p2?.[index]?.solvedAtSec != null) solver = player2Handle;
+                                if (solver) {
+                                    if (lockStatusDiv) lockStatusDiv.textContent = `🔒 LOCKED · solved by ${solver}`;
+                                } else {
+                                    if (lockStatusDiv) lockStatusDiv.textContent = `🔒 LOCKED · solved`;
+                                }
+                                if (lockStatusDiv) lockStatusDiv.className = 'problem-lock-status solved-flash';
+                            } else {
+                                // No unlocked text, just show problem info
+                                if (lockStatusDiv) lockStatusDiv.textContent = `Problem ${currentProblemIndex}/${problems.length} · waiting for AC`;
+                                if (lockStatusDiv) lockStatusDiv.className = 'problem-lock-status';
+                            }
+                        }
+                window.restoreBattleState = restoreBattleState;
+                console.log('[restoreBattleState] called', {
+                    player1Handle,
+                    player2Handle,
+                    battleActive,
+                    battleStartTime,
+                    battleEndsAt,
+                    currentProblemIndex,
+                    currentProblem,
+                    breakActive,
+                    breakSecondsLeft,
+                    timeLeftSec
+                });
         stopMatchCountdown();
+        battleActive = true;
         player1Handle = state.player1Handle;
         player2Handle = state.player2Handle;
         const liveState = state.liveState || {};
@@ -1311,6 +1607,9 @@
         player1Score = 0;
         player2Score = 0;
         battleActive = true;
+        // At match start, set both ranks to '1' for live standings
+        player1Rank = '1';
+        player2Rank = '1';
         const currentProblemNumberFromLive = Number(liveState.currentProblemNumber) || 0;
         currentProblemIndex = Math.max(0, currentProblemNumberFromLive);
         currentProblem = liveState.currentProblem || (currentProblemIndex > 0 ? selectedProblems[currentProblemIndex - 1] : null);
@@ -1325,6 +1624,7 @@
         };
 
         const problemWinners = state.problemWinners || {};
+        const problemSolveTimes = state.problemSolveTimes || {};
         Object.entries(problemWinners).forEach(([problemWinnerKey, winnerHandle]) => {
             const [problemNumberStr] = String(problemWinnerKey).split(':');
             const problemNumber = Number(problemNumberStr) || 0;
@@ -1343,17 +1643,19 @@
                 player1Score += problemPoints;
                 problemResults.p1[problemIndex].solved = true;
                 problemResults.p1[problemIndex].pending = false;
-                if (!Number.isFinite(Number(problemResults.p1[problemIndex].solvedAtSec))) {
-                    problemResults.p1[problemIndex].solvedAtSec = null;
-                }
+                // Restore solve time if available, but do not overwrite existing non-null/positive value
+                if (problemSolveTimes[problemNumber] && Number.isFinite(Number(problemSolveTimes[problemNumber].p1))) {
+                    problemResults.p1[problemIndex].solvedAtSec = Number(problemSolveTimes[problemNumber].p1);
+                } // else do not overwrite existing solvedAtSec
                 p1SolvedProblems.add(String(problemNumber));
             } else if (winnerHandle === player2Handle) {
                 player2Score += problemPoints;
                 problemResults.p2[problemIndex].solved = true;
                 problemResults.p2[problemIndex].pending = false;
-                if (!Number.isFinite(Number(problemResults.p2[problemIndex].solvedAtSec))) {
-                    problemResults.p2[problemIndex].solvedAtSec = null;
-                }
+                // Restore solve time if available, but do not overwrite existing non-null/positive value
+                if (problemSolveTimes[problemNumber] && Number.isFinite(Number(problemSolveTimes[problemNumber].p2))) {
+                    problemResults.p2[problemIndex].solvedAtSec = Number(problemSolveTimes[problemNumber].p2);
+                } // else do not overwrite existing solvedAtSec
                 p2SolvedProblems.add(String(problemNumber));
             }
         });
@@ -1386,10 +1688,30 @@
                     breakActive = false;
                     breakStartTime = null;
                     breakSecondsLeft = 0;
+                    // Always try to load next problem after break ends if queuedNextProblem exists
+                    if (typeof queuedNextProblem !== 'undefined' && queuedNextProblem) {
+                        loadNextProblem().then(() => {
+                            updatePlayerUI();
+                            renderProblemsDisplay();
+                            updateTimerDisplay();
+                            updateCurrentProblemDetailsUI();
+                        });
+                    } else {
+                        // Always update UI after break ends
+                        updatePlayerUI();
+                        renderProblemsDisplay();
+                        updateTimerDisplay();
+                        updateCurrentProblemDetailsUI();
+                    }
                 }
             }
         }
         
+        // Hide VS block and countdown overlay if visible
+        if (startBattleVSBlock) startBattleVSBlock.style.display = 'none';
+        if (matchCountdownOverlay) matchCountdownOverlay.style.display = 'none';
+
+        // Always show battle UI and update timer
         showBattleUI();
         validationSection.style.display = 'none';
         renderLiveSpectatorList(roomData?.players || []);
@@ -1397,20 +1719,18 @@
         renderProblemsDisplay();
         updateTimerDisplay();
 
-        if (currentProblem) {
-            const problemPoints = selectedProblems[Math.max(0, currentProblemIndex - 1)]?.points || currentProblem.points || 500;
-            probNameSpan.textContent = currentProblem.name;
-            probPointsSpan.textContent = problemPoints;
-            probRatingSpan.textContent = `Rating: ${currentProblem.rating}`;
-            problemUrl.href = currentProblem.url;
-            problemUrl.style.pointerEvents = 'auto';
-            problemUrl.style.opacity = '1';
-            lockStatusDiv.textContent = problemLocked
-                ? `🔒 LOCKED · solved`
-                : `🔓 Problem ${currentProblemIndex}/${problems.length} · waiting for AC`;
-            lockStatusDiv.className = 'problem-lock-status';
-        } else if (!breakActive) {
-            loadNextProblem();
+        // Always load the next problem if not set, and update UI after
+        if ((!currentProblem && !breakActive) || (!currentProblem && currentProblemIndex < problems.length)) {
+            loadNextProblem().then(() => {
+                updatePlayerUI();
+                renderProblemsDisplay();
+                updateTimerDisplay();
+            });
+        } else if (currentProblem) {
+            updateCurrentProblemDetailsUI();
+            updatePlayerUI();
+            renderProblemsDisplay();
+            updateTimerDisplay();
         }
 
         if (breakActive) {
@@ -1419,7 +1739,8 @@
             breakIndicator.style.display = 'inline-block';
             breakIndicator.textContent = `Break ${breakSecondsLeft}s`;
         }
-        
+
+        // Always start timer interval
         startBattleTimer();
         if (apiCheckInterval) clearInterval(apiCheckInterval);
         if (!breakActive) {
@@ -1498,8 +1819,8 @@
             validationProblemLink.href = '#';
             validationProblemLink.style.pointerEvents = 'none';
             validationProblemLink.style.opacity = '0.7';
-            validationProblemTitle.textContent = 'Generating validation problem...';
-            validationStatusText.textContent = 'Please wait. Validation problem is being prepared.';
+            if (validationProblemTitle) validationProblemTitle.textContent = 'Generating validation problem...';
+            if (validationStatusText) validationStatusText.textContent = 'Please wait. Validation problem is being prepared.';
             roomValidationMini.style.display = 'none';
             return;
         }
@@ -1507,25 +1828,26 @@
         validationProblemLink.href = validationProblem.url;
         validationProblemLink.style.pointerEvents = 'auto';
         validationProblemLink.style.opacity = '1';
-        validationProblemTitle.textContent = `${validationProblem.name} · ${validationProblem.rating}`;
+        if (validationProblemTitle) validationProblemTitle.textContent = `${validationProblem.name} · ${validationProblem.rating}`;
 
         roomValidationMini.href = validationProblem.url;
         roomValidationMini.style.display = 'inline-block';
 
         if (players.length < 2) {
-            validationStatusText.textContent = 'Waiting for selected opponent to join match creator room and submit Compilation Error to the provided problem.';
+            if (validationStatusText) validationStatusText.textContent = 'Waiting for selected opponent to join match creator room and submit Compilation Error to the provided problem.';
         } else {
-            validationStatusText.textContent = 'Waiting for match creator and selected opponent to submit Compilation Error to the provided problem.';
+            if (validationStatusText) validationStatusText.textContent = 'Waiting for match creator and selected opponent to submit Compilation Error to the provided problem.';
         }
     }
 
     function joinRoomUI(roomId, roomName, players, duration, interval, roomProblems, roomValidationProblem = null) {
+        console.log('[joinRoomUI] called', { roomId, roomName, players, duration, interval, roomProblems, roomValidationProblem });
         roomControls.style.display = 'none';
         activeBlitzSection.style.display = 'none';
         
         roomInfoBar.style.display = 'flex';
-        currentRoomName.textContent = roomName;
-        currentRoomId.textContent = roomId;
+        if (currentRoomName) currentRoomName.textContent = roomName;
+        if (currentRoomId) currentRoomId.textContent = roomId;
         
         displayDuration.value = `${duration} min`;
         displayInterval.value = `${interval} sec`;
@@ -1536,26 +1858,105 @@
         renderProblemsDisplay();
         
         updateRoomPlayers(players);
-        
+        // Show VS block only when both players are present and not in battle
+        if (startBattleVSBlock) {
+            // Only show if not in battle state
+            if (!battleActive && players.length >= 2) {
+                startBattleVSBlock.style.display = 'block';
+            } else {
+                startBattleVSBlock.style.display = 'none';
+            }
+        }
         if (players.length >= 2) {
             configDashboard.style.display = 'flex';
             problemsDisplaySection.style.display = 'block';
-            
             player1Handle = players[0];
             player2Handle = players[1];
-            p1HandleSpan.textContent = player1Handle;
-            p2HandleSpan.textContent = player2Handle;
-            p1HandleSpan.href = '#';
-            p2HandleSpan.href = '#';
-
-            startP1HandleInput.value = player1Handle;
-            startP2HandleInput.value = player2Handle;
-            
-            startBattleBtn.textContent = '⏳ AUTO START ENABLED';
-            startBattleBtn.disabled = true;
-            startP1HandleInput.disabled = true;
-            startP2HandleInput.disabled = true;
-            
+            if (p1HandleSpan) {
+                if (player1Handle && player1Handle !== 'Waiting') {
+                    if (window.CFUserInfo) {
+                        window.CFUserInfo.trackHandles([player1Handle]);
+                        const p1Info = window.CFUserInfo.getInfo(player1Handle) || {};
+                        const disp1 = p1Info.handle || player1Handle;
+                        p1HandleSpan.innerHTML = window.CFUserInfo.renderHandleHtml(disp1);
+                        p1HandleSpan.href = `https://codeforces.com/profile/${encodeURIComponent(disp1)}`;
+                        p1HandleSpan.setAttribute('data-handle', encodeURIComponent(player1Handle));
+                        p1HandleSpan.setAttribute('target', '_blank');
+                        p1HandleSpan.setAttribute('rel', 'noopener noreferrer');
+                    } else {
+                        p1HandleSpan.textContent = player1Handle;
+                        p1HandleSpan.href = `https://codeforces.com/profile/${encodeURIComponent(player1Handle)}`;
+                    }
+                } else {
+                    p1HandleSpan.textContent = player1Handle;
+                    p1HandleSpan.href = '#';
+                }
+            }
+            if (p2HandleSpan) {
+                if (player2Handle && player2Handle !== 'Waiting') {
+                    if (window.CFUserInfo) {
+                        window.CFUserInfo.trackHandles([player2Handle]);
+                        const p2Info = window.CFUserInfo.getInfo(player2Handle) || {};
+                        const disp2 = p2Info.handle || player2Handle;
+                        p2HandleSpan.innerHTML = window.CFUserInfo.renderHandleHtml(disp2);
+                        p2HandleSpan.href = `https://codeforces.com/profile/${encodeURIComponent(disp2)}`;
+                        p2HandleSpan.setAttribute('data-handle', encodeURIComponent(player2Handle));
+                        p2HandleSpan.setAttribute('target', '_blank');
+                        p2HandleSpan.setAttribute('rel', 'noopener noreferrer');
+                    } else {
+                        p2HandleSpan.textContent = player2Handle;
+                        p2HandleSpan.href = `https://codeforces.com/profile/${encodeURIComponent(player2Handle)}`;
+                    }
+                } else {
+                    p2HandleSpan.textContent = player2Handle;
+                    p2HandleSpan.href = '#';
+                }
+            }
+            if (startP1Handle) {
+                if (player1Handle && player1Handle !== 'Waiting') {
+                    if (window.CFUserInfo) {
+                        window.CFUserInfo.trackHandles([player1Handle]);
+                        const sp1 = window.CFUserInfo.getInfo(player1Handle) || {};
+                        const d1 = sp1.handle || player1Handle;
+                        startP1Handle.innerHTML = window.CFUserInfo.renderHandleHtml(d1);
+                        startP1Handle.href = `https://codeforces.com/profile/${encodeURIComponent(d1)}`;
+                        startP1Handle.setAttribute('data-handle', encodeURIComponent(player1Handle));
+                        startP1Handle.setAttribute('target', '_blank');
+                        startP1Handle.setAttribute('rel', 'noopener noreferrer');
+                    } else {
+                        startP1Handle.textContent = player1Handle;
+                        startP1Handle.href = `https://codeforces.com/profile/${encodeURIComponent(player1Handle)}`;
+                    }
+                } else {
+                    startP1Handle.textContent = player1Handle;
+                    startP1Handle.href = '#';
+                }
+            }
+            if (startP2Handle) {
+                if (player2Handle && player2Handle !== 'Waiting') {
+                    if (window.CFUserInfo) {
+                        window.CFUserInfo.trackHandles([player2Handle]);
+                        const sp2 = window.CFUserInfo.getInfo(player2Handle) || {};
+                        const d2 = sp2.handle || player2Handle;
+                        startP2Handle.innerHTML = window.CFUserInfo.renderHandleHtml(d2);
+                        startP2Handle.href = `https://codeforces.com/profile/${encodeURIComponent(d2)}`;
+                        startP2Handle.setAttribute('data-handle', encodeURIComponent(player2Handle));
+                        startP2Handle.setAttribute('target', '_blank');
+                        startP2Handle.setAttribute('rel', 'noopener noreferrer');
+                    } else {
+                        startP2Handle.textContent = player2Handle;
+                        startP2Handle.href = `https://codeforces.com/profile/${encodeURIComponent(player2Handle)}`;
+                    }
+                } else {
+                    startP2Handle.textContent = player2Handle;
+                    startP2Handle.href = '#';
+                }
+            }
+            // AUTO START ENABLE BUTTON (commented out)
+            // startBattleBtn.textContent = '⏳ AUTO START ENABLED';
+            // startBattleBtn.disabled = true;
+            // startP1HandleInput.disabled = true;
+            // startP2HandleInput.disabled = true;
             fetchUserRanks();
         } else {
             configDashboard.style.display = 'none';
@@ -1564,6 +1965,7 @@
     }
 
     function renderProblemsDisplay() {
+        window.renderProblemsDisplay = renderProblemsDisplay;
         let html = '';
         problems.forEach((prob, idx) => {
             html += `
@@ -1579,7 +1981,7 @@
 
     function updateRoomPlayers(players, eventMeta = null) {
         const list = Array.isArray(players) ? players.filter(Boolean) : [];
-        roomPlayers.textContent = `👥 ${list.length} joined`;
+        if (roomPlayers) roomPlayers.textContent = `👥 ${list.length} joined`;
         if (roomData) {
             roomData.players = list;
         }
@@ -1698,7 +2100,7 @@
                     { transform: 'translate(0, 0)' }
                 ],
                 {
-                    duration: 220,
+                   
                     easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
                 }
             );
@@ -1880,15 +2282,15 @@
             return;
         }
 
-        // Show at most 10 rooms, rest are scrollable
-        const visibleRooms = rooms.slice(0, 10);
+        // Show all rooms, let CSS handle scrolling
         let html = '';
-        visibleRooms.forEach(room => {
+        rooms.forEach(room => {
             html += `
                 <div class="blitz-room-card" style="position:relative;">
                     <button class="share-room-btn" title="Copy room code" style="position:absolute;top:10px;right:10px;font-size:0.78em;padding:2px 8px;min-width:unset;line-height:1.1;background:linear-gradient(180deg,#9dc4ff,#6ea8fe);color:#0a1220;border-radius:7px;border:1px solid #6ea8fe;cursor:pointer;z-index:2;" onclick="window.copyRoomShareLink('${room.id}', this)">Share</button>
                     <div class="blitz-room-info">
                         <h4>${room.name}</h4>
+                        <div style=\"font-weight:normal;font-size:0.95em;margin-bottom:2px;\">${room.hostHandle ? room.hostHandle : '?'} vs ${room.opponentHandle ? room.opponentHandle : '?'}</div>
                         <p>ID: ${room.id} | 👥 ${room.assignedPlayers || room.players} joined</p>
                         <p>⏱️ ${room.duration} min | 🔄 ${room.interval}s | 📋 ${room.problems} problems</p>
                     </div>
@@ -1896,9 +2298,6 @@
                 </div>
             `;
         });
-        if (rooms.length > 10) {
-            html += `<div style="text-align:center;color:var(--muted);padding:8px 0 0 0;font-size:0.95em;">Showing 10 of ${rooms.length} active rooms. Use search to find more.</div>`;
-        }
         activeBlitzList.innerHTML = html;
     }
 
@@ -1983,6 +2382,13 @@
 
     async function completeHandleSetup(profile) {
         userHandle = profile.handle;
+            window.userHandle = userHandle;
+            window.currentRoom = currentRoom;
+            window.currentRoom = currentRoom;
+            window.currentRoom = currentRoom;
+            window.currentRoom = currentRoom;
+            window.currentRoom = currentRoom;
+            window.currentRoom = currentRoom;
         userAvatarUrl = profile.avatar || '';
         playersValidated = true;
         userHandleInput.value = profile.handle;
@@ -2006,6 +2412,9 @@
             const target = pendingPostLoginReturnTo;
             pendingPostLoginReturnTo = '';
             window.location.href = target;
+        } else {
+            // Refresh the page after successful login if no redirect
+            window.location.reload();
         }
     }
 
@@ -2198,7 +2607,7 @@
         }
         
         const roomName = roomNameInput.value.trim() || `${userHandle}'s Room`;
-        const opponentHandle = opponentHandleInput.value.trim();
+        const opponentHandle = opponentHandleInput.value.trim().toLowerCase();
         const duration = parseInt(createDuration.value) || 40;
         const interval = parseInt(createInterval.value) || 1;
 
@@ -2358,17 +2767,23 @@
 
     async function fetchUserProfile(handle) {
         try {
-            const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
-            const data = await response.json();
-            if (data.status !== 'OK' || !Array.isArray(data.result) || !data.result[0]) {
-                return null;
+            if (window.CFUserInfo) {
+                window.CFUserInfo.trackHandles([handle]);
+                let info = window.CFUserInfo.getInfo(handle);
+                let waited = 0;
+                while ((!info || (info.titlePhoto === undefined && info.rating === null)) && waited < 2000) {
+                    await new Promise(res => setTimeout(res, 100));
+                    waited += 100;
+                    info = window.CFUserInfo.getInfo(handle);
+                }
+                if (info) return { handle: info.handle || handle, avatar: info.titlePhoto || '' };
             }
 
+            const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
+            const data = await response.json();
+            if (data.status !== 'OK' || !Array.isArray(data.result) || !data.result[0]) return null;
             const user = data.result[0];
-            return {
-                handle: user.handle,
-                avatar: user.titlePhoto || ''
-            };
+            return { handle: user.handle, avatar: user.titlePhoto || '' };
         } catch {
             return null;
         }
@@ -2459,6 +2874,36 @@
 
     async function fetchUserRanks() {
         try {
+            if (window.CFUserInfo) {
+                window.CFUserInfo.trackHandles([player1Handle, player2Handle].filter(Boolean));
+                let waited = 0;
+                let p1Info = window.CFUserInfo.getInfo(player1Handle);
+                let p2Info = window.CFUserInfo.getInfo(player2Handle);
+                while (waited < 2000 && ((p1Info == null || p1Info.rating === null) || (p2Info == null || p2Info.rating === null))) {
+                    await new Promise(res => setTimeout(res, 100));
+                    waited += 100;
+                    p1Info = window.CFUserInfo.getInfo(player1Handle);
+                    p2Info = window.CFUserInfo.getInfo(player2Handle);
+                }
+
+                if (p1Info && p1Info.rating !== null && p2Info && p2Info.rating !== null) {
+                    const p1Rating = p1Info.rating || 0;
+                    player1Rating = p1Rating;
+                    const p1RankInfo = getRankFromRating(p1Rating);
+                    player1Rank = p1RankInfo.name;
+                    player1RankColor = p1RankInfo.color;
+
+                    const p2Rating = p2Info.rating || 0;
+                    player2Rating = p2Rating;
+                    const p2RankInfo = getRankFromRating(p2Rating);
+                    player2Rank = p2RankInfo.name;
+                    player2RankColor = p2RankInfo.color;
+
+                    updatePlayerUI();
+                    return;
+                }
+            }
+
             const response = await fetch(`https://codeforces.com/api/user.info?handles=${player1Handle};${player2Handle}`);
             const data = await response.json();
             
@@ -2497,21 +2942,27 @@
     }
 
     function updatePlayerUI() {
-        p1HandleSpan.textContent = player1Handle;
-        p1HandleSpan.href = '#';
-        p1HandleSpan.className = `player-handle ${player1RankColor}`;
-        p1RankSpan.textContent = player1Rank;
-        p1RankSpan.className = `player-rank ${player1RankColor}`;
-        
-        p2HandleSpan.textContent = player2Handle;
-        p2HandleSpan.href = '#';
-        p2HandleSpan.className = `player-handle ${player2RankColor}`;
-        p2RankSpan.textContent = player2Rank;
-        p2RankSpan.className = `player-rank ${player2RankColor}`;
-        
-        p1ScoreSpan.textContent = player1Score;
-        p2ScoreSpan.textContent = player2Score;
-        
+        window.updatePlayerUI = updatePlayerUI;
+        if (p1HandleSpan) {
+            p1HandleSpan.textContent = player1Handle;
+            p1HandleSpan.href = '#';
+            p1HandleSpan.className = `player-handle ${player1RankColor}`;
+        }
+        if (p1RankSpan) {
+            p1RankSpan.textContent = player1Rank;
+            p1RankSpan.className = `player-rank ${player1RankColor}`;
+        }
+        if (p2HandleSpan) {
+            p2HandleSpan.textContent = player2Handle;
+            p2HandleSpan.href = '#';
+            p2HandleSpan.className = `player-handle ${player2RankColor}`;
+        }
+        if (p2RankSpan) {
+            p2RankSpan.textContent = player2Rank;
+            p2RankSpan.className = `player-rank ${player2RankColor}`;
+        }
+        if (p1ScoreSpan) p1ScoreSpan.textContent = player1Score;
+        if (p2ScoreSpan) p2ScoreSpan.textContent = player2Score;
         renderLeaderboard();
     }
 
@@ -2539,20 +2990,25 @@
 
         players.sort((a, b) => {
             if (b.score !== a.score) return b.score - a.score;
-
             const aKnown = Number.isFinite(a.rating);
             const bKnown = Number.isFinite(b.rating);
             if (aKnown && bKnown && a.rating !== b.rating) {
                 return a.rating - b.rating;
             }
-
             if (aKnown !== bKnown) {
                 return aKnown ? -1 : 1;
             }
-
             return leaderboardTieOrder.indexOf(a.id) - leaderboardTieOrder.indexOf(b.id);
         });
 
+        // If both players have the same score, set both ranks to 1
+        if (players.length === 2 && players[0].score === players[1].score) {
+            players[0].rank = '1';
+            players[1].rank = '1';
+        } else {
+            // Otherwise, assign ranks based on position
+            players.forEach((p, idx) => { p.rank = String(idx + 1); });
+        }
         return players;
     }
 
@@ -2694,25 +3150,7 @@
                 try {
                     osNotification.close();
                 } catch {}
-            }, 10000);
-            return;
-        } catch (error) {
-            console.warn('Direct Notification API failed, trying service worker path:', error);
-        }
-
-        try {
-            if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
-                const registration = await navigator.serviceWorker.getRegistration();
-                if (registration && typeof registration.showNotification === 'function') {
-                    await registration.showNotification(title, {
-                        body: message,
-                        tag: `blitz-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                        renotify: true,
-                        silent: false
-                    });
-                    return;
-                }
-            }
+            }, 60000);
         } catch (error) {
             console.warn('Service worker notification path failed:', error);
         }
@@ -2793,6 +3231,7 @@
     }
 
     function updateTimerDisplay() {
+        window.updateTimerDisplay = updateTimerDisplay;
         matchTimer.textContent = formatTime(timeLeftSec);
     }
 
@@ -2807,37 +3246,36 @@
 
     function startBattleTimer() {
         if (timerInterval) clearInterval(timerInterval);
-        
+        console.log('[startBattleTimer] called', {
+            battleActive,
+            battleEndsAt,
+            timeLeftSec
+        });
         timerInterval = setInterval(() => {
             if (!battleActive) {
                 clearInterval(timerInterval);
                 return;
             }
-            
             if (battleEndsAt) {
                 const now = getSyncedNow();
                 const newTimeLeft = Math.max(0, Math.floor((battleEndsAt - now) / 1000));
-                
                 if (newTimeLeft !== timeLeftSec) {
+                    console.log('[timer tick]', { newTimeLeft, timeLeftSec, battleEndsAt, now });
                     timeLeftSec = newTimeLeft;
                     updateTimerDisplay();
-                    
                     if (timeLeftSec <= 0) {
                         verifyFinalSubmissionsAtTimerEnd();
                     }
                 }
             }
-            
             if (breakActive && breakStartTime) {
                 const now = getSyncedNow();
                 const elapsedSeconds = Math.floor((now - breakStartTime) / 1000);
                 const newBreakLeft = Math.max(0, 60 - elapsedSeconds);
-                
                 if (newBreakLeft !== breakSecondsLeft) {
                     breakSecondsLeft = newBreakLeft;
                     breakTimerDiv.textContent = `⏳ break ${breakSecondsLeft}s`;
                     breakIndicator.textContent = `Break ${breakSecondsLeft}s`;
-                    
                     if (breakSecondsLeft <= 0) {
                         endBreak();
                     }
@@ -2960,8 +3398,10 @@
         matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
 
         try {
+            let checked = false;
+            let noAcceptedOrPending = false;
             while (battleActive && !breakActive && !problemLocked && currentProblem) {
-
+                checked = true;
                 const [p1Response, p2Response] = await Promise.all([
                     fetch(`https://codeforces.com/api/user.status?handle=${player1Handle}&from=1&count=100`),
                     fetch(`https://codeforces.com/api/user.status?handle=${player2Handle}&from=1&count=100`)
@@ -2974,44 +3414,44 @@
                 const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, deadlineMs, windowStartMs);
                 const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, deadlineMs, windowStartMs);
                 const hasBlockingPending = hasBlockingPendingForWinnerDecision(p1Analysis, p2Analysis);
+                const hasAnyAccepted = !!p1Analysis.accepted || !!p2Analysis.accepted;
 
                 const p1Accepted = p1Analysis.accepted;
                 const p2Accepted = p2Analysis.accepted;
 
-                if (p1Accepted || p2Accepted) {
-                    if (hasBlockingPending) {
-                        reportPendingSubmissionStatus(true);
-                        matchStatusText.textContent = '⏱️ Match timer ended. Waiting for queued verdicts...';
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        continue;
-                    }
-
-                    reportPendingSubmissionStatus(false);
-                    let solver = 'p1';
-                    let solverSubmitMs = p1Accepted?.submitMs || null;
-                    if (!p1Accepted) solver = 'p2';
-                    else if (p2Accepted && p2Accepted.submitMs < p1Accepted.submitMs) solver = 'p2';
-
-                    if (solver === 'p2') {
-                        solverSubmitMs = p2Accepted?.submitMs || null;
-                    }
-
-                    endAfterCurrentSolve = true;
-                    handleSolve(solver, solverSubmitMs);
+                if (hasBlockingPending) {
+                    lockStatusDiv.textContent = `⏳ Problem ${currentProblemIndex}/${problems.length} · queued verdict pending`;
+                    lockStatusDiv.className = 'problem-lock-status';
+                    reportPendingSubmissionStatus(true);
+                    updatePlayerUI();
                     return;
                 }
 
-                if (!p1Analysis.hasPending && !p2Analysis.hasPending) {
-                    reportPendingSubmissionStatus(false);
-                    break;
+                reportPendingSubmissionStatus(false);
+
+                if (p1Accepted || p2Accepted) {
+                    if (!p2Accepted || (p1Accepted && p1Accepted.submitMs <= p2Accepted.submitMs)) {
+                        handleSolve('p1', p1Accepted?.submitMs || null);
+                    } else {
+                        handleSolve('p2', p2Accepted?.submitMs || null);
+                    }
+                } else {
+                    // No accepted submissions and no blocking pending, so end match
+                    noAcceptedOrPending = true;
                 }
 
-                reportPendingSubmissionStatus(true);
-
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                updatePlayerUI();
+                if (noAcceptedOrPending) {
+                    matchStatusText.textContent = '⏱️ Match timer ended. No submissions. Match ended as tie.';
+                    stopBattle(true);
+                    return;
+                }
             }
-
-            stopBattle(true);
+            // If we never entered the loop (problemLocked, no currentProblem, etc), or after loop, ensure match ends
+            if (!problemLocked && (!currentProblem || !hasAnyPendingOnCurrentProblem())) {
+                matchStatusText.textContent = '⏱️ Match timer ended. No submissions. Match ended as tie.';
+                stopBattle(true);
+            }
         } catch (error) {
             console.error('Final submission verification failed:', error);
             stopBattle(true);
@@ -3039,8 +3479,8 @@
             return;
         }
 
-        p1Row.classList.remove('solved');
-        p2Row.classList.remove('solved');
+        if (p1Row && p1Row.classList) p1Row.classList.remove('solved');
+        if (p2Row && p2Row.classList) p2Row.classList.remove('solved');
 
         if (!queuedNextProblem) {
             queuedNextProblem = selectedProblems[currentProblemIndex] || null;
@@ -3056,25 +3496,41 @@
             return;
         }
 
+
+        // Show notification for new problem
+        if (window.Notification && Notification.permission === 'granted') {
+            new Notification('🆕 New Problem', {
+                body: `${prob.name} (Rating: ${prob.rating})`,
+                silent: true
+            });
+        } else if (typeof showDesktopNotification === 'function') {
+            showDesktopNotification('🆕 New Problem', `${prob.name} (Rating: ${prob.rating})`, false, true);
+        }
+
         queuedNextProblem = null;
         currentProblem = prob;
         currentProblemOpenedAt = Date.now();
         currentProblemIndex++;
-        
+
         const problemPoints = selectedProblems[currentProblemIndex - 1]?.points || 500;
-        
+
+        // Show battle panel
+        if (arenaPanel) arenaPanel.style.display = 'flex';
+
         probNameSpan.textContent = prob.name;
         probPointsSpan.textContent = problemPoints;
         probRatingSpan.textContent = `Rating: ${prob.rating}`;
-        
+
         problemUrl.href = prob.url;
         problemUrl.style.pointerEvents = 'auto';
         problemUrl.style.opacity = '1';
-        
+
         lockStatusDiv.textContent = `🔓 Problem ${currentProblemIndex}/${problems.length} · waiting for AC`;
         lockStatusDiv.className = 'problem-lock-status';
-        
+
         problemLocked = false;
+        // Always update problem details UI
+        if (typeof updateCurrentProblemDetailsUI === 'function') updateCurrentProblemDetailsUI();
         saveBattleRuntimeState();
     }
 
@@ -3158,7 +3614,9 @@
             if (Number.isFinite(Number(solvedAtSec))) {
                 p1Result.solvedAtSec = solvedAtSec;
             }
-            p1Row.classList.add('solved');
+            if (p1Row) {
+                p1Row.classList.add('solved');
+            }
             if (currentProblem) {
                 p1SolvedProblems.add(currentProblem.id);
             }
@@ -3170,7 +3628,9 @@
             if (Number.isFinite(Number(solvedAtSec))) {
                 p2Result.solvedAtSec = solvedAtSec;
             }
-            p2Row.classList.add('solved');
+            if (p2Row) {
+                p2Row.classList.add('solved');
+            }
             if (currentProblem) {
                 p2SolvedProblems.add(currentProblem.id);
             }
@@ -3247,9 +3707,12 @@
         }
 
         saveBattleRuntimeState();
+        // Ensure break timer updates instantly
+        startBattleTimer();
     }
 
     function endBreak() {
+        window.endBreak = endBreak;
         breakActive = false;
         breakStartTime = null;
         breakTimerDiv.style.display = 'none';
@@ -3257,7 +3720,22 @@
         saveBattleRuntimeState();
         
         if (battleActive && currentProblemIndex < problems.length) {
+            // Ensure queuedNextProblem is set from selectedProblems if not already set
+            if (!queuedNextProblem) {
+                console.log('[endBreak] queuedNextProblem was empty, setting from selectedProblems', {
+                    currentProblemIndex,
+                    selectedProblem: selectedProblems[currentProblemIndex]
+                });
+                queuedNextProblem = selectedProblems[currentProblemIndex] || null;
+            } else {
+                console.log('[endBreak] queuedNextProblem already set', { queuedNextProblem });
+            }
             loadNextProblem().then(() => {
+                console.log('[endBreak] loadNextProblem finished', {
+                    currentProblem,
+                    currentProblemIndex,
+                    queuedNextProblem
+                });
                 if (battleActive && !breakActive && currentProblem) {
                     apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
                 }
@@ -3319,6 +3797,8 @@
     }
 
     async function stopBattle(fromServer = false, persistResult = true) {
+        window.stopBattle = stopBattle;
+        window.handleSolve = handleSolve;
         if (!battleActive && resultSubmitted) return;
 
         if (celebrationRedirectTimer) {
@@ -3359,15 +3839,22 @@
             winner = player1Handle;
         } else if (player2Score > player1Score) {
             winner = player2Handle;
-        } else {
+        } else if (player1Handle && player2Handle) {
             winner = 'tie';
+        } else {
+            winner = '';
         }
 
         if (!matchEndNotificationShown) {
-            const winnerText = winner === 'tie'
-                ? 'Match ended in a tie. Check Results page.'
-                : `Winner: ${winner}. Check Results page.`;
-            showDesktopNotification('🏁 Match Ended', winnerText, winner !== 'tie', true);
+            let winnerText = '';
+            if (winner === 'tie') {
+                winnerText = 'Match ended in a tie. Check Results page.';
+            } else if (winner) {
+                winnerText = `Winner: ${winner}. Check Results page.`;
+            } else {
+                winnerText = 'Match ended. Check Results page.';
+            }
+            showDesktopNotification('🏁 Match Ended', winnerText, true, true);
             matchEndNotificationShown = true;
         }
 
@@ -3378,18 +3865,23 @@
         matchSpectatorHandles = new Set();
 
         const finalScoreText = `${player1Handle}: ${player1Score} · ${player2Handle}: ${player2Score}`;
-        const resultText = winner === 'tie'
-            ? `Tie` 
-            : `Winner: ${winner}`;
+        let resultText = '';
+        if (winner === 'tie') {
+            resultText = 'Tie';
+        } else if (winner) {
+            resultText = `Winner: ${winner}`;
+        } else {
+            resultText = 'Match ended';
+        }
         matchStatusText.textContent = `✅ Blitz ended · ${resultText} · ${finalScoreText}`;
-        
-        if (winner !== 'tie') {
-            winnerHandleSpan.textContent = winner;
+
+        // Always show celebration card, even if no winner/tie (no submissions)
+        if (winner === 'tie' || (winner && winner !== '') || winner === '') {
+            winnerHandleSpan.textContent = (winner === 'tie') ? 'Tie' : (winner ? winner : 'No Winner');
             celebrationModal.style.display = 'flex';
             if (closeCelebrationBtn) {
                 closeCelebrationBtn.textContent = 'Close';
             }
-            
             for (let i = 0; i < 50; i++) {
                 const confetti = document.createElement('div');
                 confetti.className = 'confetti';
@@ -3449,7 +3941,15 @@
             }
 
             passwordModal.style.display = 'none';
-            stopBattle(false, false);
+            if (ws && ws.readyState === WebSocket.OPEN && currentRoom) {
+                ws.send(JSON.stringify({
+                    type: 'CANCEL_ROOM',
+                    roomId: currentRoom,
+                    handle: userHandle,
+                    adminPassword: enteredPassword
+                }));
+            }
+            stopBattle(false, true); // Ensure match is fully ended and UI updates
             showDesktopNotification('⛔ Game Cancelled', 'Game cancelled by administrator', true);
         } catch (error) {
             console.error('Admin verification failed:', error);
@@ -3539,6 +4039,42 @@
         }
 
         bindArenaPlayerProfileLinks();
+        // Decorate any static CF profile links on the page to use CFUserInfo rendering
+        function decorateStaticProfileLinks() {
+            try {
+                const anchors = Array.from(document.querySelectorAll('a[href^="https://codeforces.com/profile/"]'));
+                anchors.forEach(a => {
+                    try {
+                        const href = a.getAttribute('href') || '';
+                        const m = href.match(/https?:\/\/codeforces.com\/profile\/(.+)$/i);
+                        if (!m) return;
+                        let orig = m[1] || '';
+                        try { orig = decodeURIComponent(orig); } catch {}
+                        a.setAttribute('data-handle', orig);
+                        a.classList.add('player-handle-link');
+                        if (window.CFUserInfo) {
+                            window.CFUserInfo.trackHandles([orig]);
+                            const info = window.CFUserInfo.getInfo(orig) || {};
+                            const display = info.handle || orig;
+                            a.innerHTML = window.CFUserInfo.renderHandleHtml(display);
+                            a.href = `https://codeforces.com/profile/${encodeURIComponent(display)}`;
+                            a.setAttribute('target', '_blank');
+                            a.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                });
+            } catch (e) {}
+        }
+        decorateStaticProfileLinks();
+
+        // If CFUserInfo provides subscribe, refresh static links when info arrives
+        if (window.CFUserInfo && typeof window.CFUserInfo.subscribe === 'function') {
+            window.CFUserInfo.subscribe(() => {
+                decorateStaticProfileLinks();
+            });
+        }
         connectWebSocket();
     }
 

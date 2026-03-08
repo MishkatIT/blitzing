@@ -53,42 +53,40 @@
         </table>
     </section>
 
-    <section class="arena-panel" id="arenaPanel" style="display: none;">
-        <div class="vs-players">
-            <div class="player-row player1" id="player1Row">
-                <div class="player-info">
-                    <a class="player-handle" id="p1Handle" target="_blank">Waiting</a>
-                    <span class="player-rank" id="p1Rank"></span>
-                </div>
-                <span class="player-score" id="p1Score">0</span>
-                <span class="solved-badge">Solved</span>
+    <div class="arena-flex-layout" id="arenaPanel" style="display: none;">
+        <section class="spectator-panel" id="spectatorPanel">
+            <div class="spectator-head">
+                <h3>Live Spectators</h3>
+                <span class="spectator-count" id="spectatorCountText">0 live</span>
             </div>
-            <div class="player-row player2" id="player2Row">
-                <div class="player-info">
-                    <a class="player-handle" id="p2Handle" target="_blank">Waiting</a>
-                    <span class="player-rank" id="p2Rank"></span>
-                </div>
-                <span class="player-score" id="p2Score">0</span>
-                <span class="solved-badge">Solved</span>
+            <div class="spectator-list" id="spectatorList"></div>
+        </section>
+        <div class="vs-players-redesign">
+            <div class="vs-player-box player1-vs">
+                <div class="vs-player-avatar" id="p1Avatar">👤</div>
+                <a class="vs-player-handle" id="p1Handle" href="#" target="_blank" rel="noopener noreferrer">Waiting</a>
+            </div>
+            <div class="vs-center-vs">
+                <span class="vs-glow">VS</span>
+            </div>
+            <div class="vs-player-box player2-vs">
+                <div class="vs-player-avatar" id="p2Avatar">👤</div>
+                <a class="vs-player-handle" id="p2Handle" href="#" target="_blank" rel="noopener noreferrer">Waiting</a>
             </div>
         </div>
-
         <div class="problem-card">
             <div class="problem-header">
                 <span class="problem-title" id="probName">—</span>
                 <span class="problem-points" id="probPoints">0</span>
             </div>
-
             <div class="problem-rating-badge" id="probRating">Rating: 1200</div>
-
             <div class="problem-link">
                 <a href="#" target="_blank" id="problemUrl" style="pointer-events: none; opacity: 0.7;">Open Problem</a>
             </div>
-
             <div id="lockStatus" class="problem-lock-status">Open · waiting solve</div>
             <div id="breakTimer" class="break-timer" style="display: none;">Break 1:00</div>
         </div>
-    </section>
+    </div>
 
     <section class="room-controls" id="roomControls">
         <section class="active-blitz-section" id="activeBlitzSection">
@@ -96,7 +94,7 @@
                 <h2>Active Rooms</h2>
                 <input type="text" id="activeRoomsSearchInput" class="active-search-input" placeholder="Search by room name or ID">
             </div>
-            <div class="blitz-list" id="activeBlitzList" style="max-height:520px;overflow-y:auto;">
+            <div class="blitz-list" id="activeBlitzList" style="overflow-y:auto;">
                 <div class="live-loading"><span class="live-dot"></span><span>Live · Loading active rooms...</span></div>
             </div>
         </section>
@@ -125,12 +123,36 @@
 
                         <div class="config-row">
                             <label for="createInterval">Submission check interval (seconds)</label>
-                            <input type="number" id="createInterval" min="1" max="10" value="1" step="1">
+                            <div style="position:relative;display:inline-block;">
+                                <input type="number" id="createInterval" min="1" max="10" value="1" step="1" readonly style="padding-right:24px;cursor:not-allowed;">
+                                <span id="createIntervalLockIcon" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:1.1em;color:#b99;" title="Restricted">
+                                    <span style="cursor:not-allowed;display:inline-block;width:1.2em;">&#128274;</span>
+                                </span>
+                            </div>
+                        <script>
+                        // Show lock icon on hover for readonly interval input in create room
+                        document.addEventListener('DOMContentLoaded', function() {
+                            var intervalInput = document.getElementById('createInterval');
+                            var lockIcon = document.getElementById('createIntervalLockIcon');
+                            if (intervalInput && lockIcon) {
+                                function showLock() { lockIcon.style.display = 'inline'; }
+                                function hideLock(e) {
+                                    if (!intervalInput.matches(':hover') && !lockIcon.matches(':hover')) {
+                                        lockIcon.style.display = 'none';
+                                    }
+                                }
+                                intervalInput.addEventListener('mouseenter', showLock);
+                                intervalInput.addEventListener('mouseleave', hideLock);
+                                lockIcon.addEventListener('mouseenter', showLock);
+                                lockIcon.addEventListener('mouseleave', hideLock);
+                            }
+                        });
+                        </script>
                         </div>
                     </div>
 
                     <div class="config-group">
-                        <h3>Problems</h3>
+                        <h3>Problems <span id="createProblemsCount" style="font-weight:normal;color:#888;font-size:0.95em;"></span></h3>
                         <div id="createProblemsList" class="problems-list"></div>
                         <button type="button" class="add-problem-btn-small" id="createAddProblemBtn">Add Problem</button>
                     </div>
@@ -162,37 +184,53 @@
         <div class="spectator-list" id="spectatorList"></div>
     </section>
 
-    <section class="config-dashboard" id="configDashboard" style="display: none;">
-        <div class="config-block">
-            <label>Duration</label>
-            <input type="text" id="displayDuration" readonly class="config-display">
-        </div>
-        <div class="config-block">
-            <label>Submission Check</label>
-            <input type="text" id="displayInterval" readonly class="config-display">
-        </div>
-        <div class="config-block">
-            <label>Problem Count</label>
-            <input type="text" id="displayProblems" readonly class="config-display">
-        </div>
-        <div class="action-buttons">
-            <div class="start-battle">
-                <input type="text" id="startP1HandleInput" placeholder="Player 1 handle">
-                <input type="text" id="startP2HandleInput" placeholder="Player 2 handle">
-                <button id="startBattleBtn" disabled>Waiting for Host</button>
+    <div class="config-validation-row">
+        <section class="config-dashboard" id="configDashboard" style="display: none;">
+            <div class="config-block">
+                <label>Duration</label>
+                <input type="text" id="displayDuration" readonly class="config-display">
+            </div>
+            <div class="config-block">
+                <label>Submission Check</label>
+                <input type="text" id="displayInterval" readonly class="config-display">
+            </div>
+            <div class="config-block">
+                <label>Problem Count</label>
+                <input type="text" id="displayProblems" readonly class="config-display">
+            </div>
+        </section>
+        <section class="validation-section" id="validationSection" style="display: none;">
+            <h2>Ready Check</h2>
+            <p>Both players must click <strong>Start Match</strong> to begin.</p>
+            <div class="validation-problem">
+                <a href="#" target="_blank" id="validationProblemLink" style="display:none;">Open generated validation problem</a>
+                <span id="validationProblemTitle" style="display:none;">—</span>
+                <span id="validationStatusText">Waiting for both players to click Start Match...</span>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- VS Start Battle Block moved below config/validation sections -->
+
+    <div class="start-battle-vs-redesign" id="startBattleVSBlock" style="display: none;">
+        <div class="vs-players-redesign">
+            <div class="vs-player-box player1-vs">
+                <div class="vs-player-avatar" id="startP1Avatar">👤</div>
+                <a class="vs-player-handle" id="startP1Handle" href="#" target="_blank" rel="noopener noreferrer">Waiting</a>
+            </div>
+            <div class="vs-center-vs">
+                <span class="vs-glow">VS</span>
+            </div>
+            <div class="vs-player-box player2-vs">
+                <div class="vs-player-avatar" id="startP2Avatar">👤</div>
+                <a class="vs-player-handle" id="startP2Handle" href="#" target="_blank" rel="noopener noreferrer">Waiting</a>
             </div>
         </div>
-    </section>
-
-    <section class="validation-section" id="validationSection" style="display: none;">
-        <h2>Validation Step</h2>
-        <p>Both players must submit <strong>COMPILATION_ERROR</strong> on the generated problem before the host can start.</p>
-        <div class="validation-problem">
-            <a href="#" target="_blank" id="validationProblemLink">Open generated validation problem</a>
-            <span id="validationProblemTitle">—</span>
-            <span id="validationStatusText">Waiting for players to submit compilation error...</span>
+        <div style="display: flex; justify-content: center; margin-top: 18px;">
+            <button id="startBattleBtn" disabled>Waiting for Host</button>
         </div>
-    </section>
+    </div>
 
     <section class="problems-section" id="problemsDisplaySection" style="display: none;">
         <h2>Problem Set</h2>
@@ -287,6 +325,7 @@
 <script src="global-profile-presence.js"></script>
 <script src="quick-nav-overflow.js"></script>
 <script src="floating-scrollbar.js"></script>
+<script src="cf-user-info.js"></script>
 <script src="script.js"></script>
 <script src="search-suggestions.js"></script>
 </body>

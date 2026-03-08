@@ -1,0 +1,60 @@
+[
+  {
+    "id": "HKKUQ4",
+    "name": "MITMAX's Room",
+    "players": [
+      {
+        "handle": "MITMAX"
+      }
+    ],
+    "host": "MITMAX",
+    "hostHandle": "MITMAX",
+    "opponentHandle": "greed_y",
+    "duration": 40,
+    "interval": 1,
+    "problems": [
+      {
+        "points": 2,
+        "rating": 800
+      },
+      {
+        "points": 3,
+        "rating": 800
+      },
+      {
+        "points": 4,
+        "rating": 900
+      },
+      {
+        "points": 6,
+        "rating": 1000
+      },
+      {
+        "points": 8,
+        "rating": 1000
+      },
+      {
+        "points": 10,
+        "rating": 1100
+      },
+      {
+        "points": 12,
+        "rating": 1200
+      }
+    ],
+    "validationProblem": null,
+    "battleState": null,
+    "createdAt": 1772949706442,
+    "countdownEndsAt": null,
+    "countdownInProgress": false,
+    "firstProblemGenerationInProgress": false,
+    "preGeneratedFirstProblem": null,
+    "preGeneratedProblems": [],
+    "bracketId": null,
+    "bracketMatchId": null,
+    "bracketExcludedProblemIds": [],
+    "pendingSubmissionActive": false,
+    "validationCheckInProgress": false,
+    "startInProgress": false
+  }
+]

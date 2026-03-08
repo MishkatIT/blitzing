@@ -14,6 +14,7 @@ const PORT = process.env.PORT || 3000;
 const RESULTS_FILE = path.join(__dirname, 'results.json');
 const BRACKETS_FILE = path.join(__dirname, 'brackets.json');
 const FEEDBACK_FILE = path.join(__dirname, 'feedback.json');
+const { ROOMS_FILE, initRoomsFile } = require('./rooms-persistence');
 const ADMIN_HANDLE_HASH_SALT = 'blitz_admin_handle_v1';
 const ADMIN_PIN_HASH_SALT = 'blitz_admin_pin_v1';
 const ADMIN_PIN_HASH = 'ea8ed8fdc6e6e9bfb38c14d8ac51e35ef55881744fcb973e2265e605c16abb17';
@@ -40,6 +41,29 @@ const ADMIN_PIN_LOCK_MS = 10 * 60 * 1000;
 
 // Store rooms in memory
 const rooms = new Map();
+
+// Initialize persistent rooms file
+const { saveRoomsToDisk, loadRoomsFromDisk } = require('./rooms-persistence');
+initRoomsFile();
+
+// Restore rooms from disk on startup
+(async () => {
+    const loadedRooms = await loadRoomsFromDisk();
+    for (const room of loadedRooms) {
+        // Remove any non-serializable fields just in case
+        delete room.endTimeout;
+        delete room.cleanupTimeout;
+        delete room.noOpponentTimeout;
+        delete room.unstartedTimeout;
+        delete room.countdownTimeout;
+        delete room.breakAdvanceTimeout;
+        // Remove ws from players
+        if (Array.isArray(room.players)) {
+            room.players = room.players.map(player => ({ ...player, ws: null }));
+        }
+        rooms.set(room.id, room);
+    }
+})();
 let lastSeenMap = {};
 const heartbeatSeenMap = new Map();
 let profilesMap = {};
@@ -1327,15 +1351,19 @@ function getFirstTwoConnectedHandles(room) {
 function getAutoStartPair(room) {
     const handles = room.players
         .filter(player => player.handle && player.ws && player.ws.readyState === WebSocket.OPEN)
-        .map(player => player.handle);
+        .map(player => String(player.handle).trim().toLowerCase());
+
+    const host = String(room.host || '').trim().toLowerCase();
+    const opponent = String(room.opponentHandle || '').trim().toLowerCase();
 
     if (room.opponentHandle) {
-        if (!handles.includes(room.host)) {
+        if (!handles.includes(host)) {
             return { pair: null, waitMessage: 'Waiting for host to be connected.' };
         }
-        if (!handles.includes(room.opponentHandle)) {
+        if (!handles.includes(opponent)) {
             return { pair: null, waitMessage: `Waiting for selected opponent ${room.opponentHandle} to join room.` };
         }
+        // Return original-cased handles for UI
         return { pair: [room.host, room.opponentHandle], waitMessage: '' };
     }
 
@@ -1343,7 +1371,11 @@ function getAutoStartPair(room) {
         return { pair: null, waitMessage: 'Waiting for match creator and opponent to be connected.' };
     }
 
-    return { pair: [handles[0], handles[1]], waitMessage: '' };
+    // Find original-cased handles for the first two
+    const originalHandles = room.players
+        .filter(player => player.handle && player.ws && player.ws.readyState === WebSocket.OPEN)
+        .map(player => player.handle);
+    return { pair: [originalHandles[0], originalHandles[1]], waitMessage: '' };
 }
 
 function broadcastValidationStatus(room, payload) {
@@ -1470,6 +1502,31 @@ async function verifyTimerEndSubmissions(room) {
                 const solveKey = `${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}:${solverHandle}`;
                 room.battleState.solveAnnouncements[solveKey] = true;
 
+                // Persist solve timestamp to results.json
+                (async () => {
+                    try {
+                        const resultsPath = RESULTS_FILE;
+                        const resultsRaw = await fs.readFile(resultsPath, 'utf8');
+                        const results = JSON.parse(resultsRaw);
+                        const match = results.find(m => m.roomId === room.id);
+                        if (match && Array.isArray(match.problems)) {
+                            const prob = match.problems.find(p => p.id === (currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`));
+                            if (prob) {
+                                const nowSec = Math.floor(Date.now() / 1000);
+                                if (prob.p1Result && normalizeHandle(solverHandle) === normalizeHandle(room.battleState.player1Handle)) {
+                                    prob.p1Result.solvedAtSec = nowSec;
+                                }
+                                if (prob.p2Result && normalizeHandle(solverHandle) === normalizeHandle(room.battleState.player2Handle)) {
+                                    prob.p2Result.solvedAtSec = nowSec;
+                                }
+                                await fs.writeFile(resultsPath, JSON.stringify(results, null, 2));
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Failed to persist solve timestamp:', err);
+                    }
+                })();
+
                 sendToRoom(room, {
                     type: 'PROBLEM_SOLVED',
                     roomId: room.id,
@@ -1479,8 +1536,6 @@ async function verifyTimerEndSubmissions(room) {
                     solveKey
                 });
             }
-
-            break;
         }
 
         const hasPending = p1Analysis.hasPending || p2Analysis.hasPending;
@@ -1777,6 +1832,7 @@ async function startBattleForPair(room, startP1, startP2) {
     };
 
     if (room.endTimeout) {
+    saveRoomsToDisk(rooms);
         clearTimeout(room.endTimeout);
     }
 
@@ -1805,22 +1861,29 @@ async function startBattleForPair(room, startP1, startP2) {
 }
 
 async function evaluateRoomValidationAndAutoStart(room) {
-    if (!room) return;
-    if (room.battleState && room.battleState.status === 'running') return;
-    if (isBattleEnded(room) || isRoomExpired(room)) return;
-    if (room.validationCheckInProgress || room.startInProgress || room.countdownInProgress) return;
-
-    if (!room.validationProblem) {
-        broadcastValidationStatus(room, {
-            pair: [],
-            statuses: {},
-            message: 'Validation problem is being generated. Please wait...'
-        });
+    if (!room) {
+        console.log('[DEBUG] evaluateRoomValidationAndAutoStart: No room');
+        return;
+    }
+    if (room.battleState && room.battleState.status === 'running') {
+        console.log('[DEBUG] evaluateRoomValidationAndAutoStart: Battle already running');
+        return;
+    }
+    if (isBattleEnded(room) || isRoomExpired(room)) {
+        console.log('[DEBUG] evaluateRoomValidationAndAutoStart: Battle ended or room expired');
+        return;
+    }
+    if (room.validationCheckInProgress || room.startInProgress || room.countdownInProgress) {
+        console.log('[DEBUG] evaluateRoomValidationAndAutoStart: Validation/start/countdown in progress');
         return;
     }
 
+    // --- CE error waiting logic commented out ---
+    // Instead, require both players to click a start button to begin the match
+
     const { pair, waitMessage } = getAutoStartPair(room);
     if (!pair) {
+        console.log('[DEBUG] evaluateRoomValidationAndAutoStart: No pair found');
         broadcastValidationStatus(room, {
             pair: [],
             statuses: {},
@@ -1829,90 +1892,74 @@ async function evaluateRoomValidationAndAutoStart(room) {
         return;
     }
 
+    // Track ready state for both players (normalize handles)
+    if (!room.playerReady) room.playerReady = {};
     const [p1, p2] = pair;
-    const minValidationCeTimeSec = Number(room?.validationProblem?.generatedAtSec)
-        || Math.floor((Number(room?.createdAt) || Date.now()) / 1000);
+    const normP1 = String(p1 || '').trim().toLowerCase();
+    const normP2 = String(p2 || '').trim().toLowerCase();
+    const ready1 = !!room.playerReady[normP1];
+    const ready2 = !!room.playerReady[normP2];
+    console.log(`[DEBUG] evaluateRoomValidationAndAutoStart: normP1=${normP1}, ready1=${ready1}, normP2=${normP2}, ready2=${ready2}`);
 
-    room.validationCheckInProgress = true;
-    try {
-        const [validP1, validP2, p1HasCE, p2HasCE] = await Promise.all([
-            validateHandle(p1),
-            validateHandle(p2),
-            hasCompilationErrorOnProblem(p1, room.validationProblem, minValidationCeTimeSec),
-            hasCompilationErrorOnProblem(p2, room.validationProblem, minValidationCeTimeSec)
-        ]);
+    let message = 'Waiting for both players to click Start Match.';
+    if (ready1 && !ready2) message = `Waiting for ${p2} to click Start Match.`;
+    if (!ready1 && ready2) message = `Waiting for ${p1} to click Start Match.`;
+    if (ready1 && ready2) message = `Both players ready. Match starts in ${Math.round(MATCH_START_COUNTDOWN_MS / 1000)} seconds.`;
 
-        const statuses = {
-            [p1]: !!(validP1 && p1HasCE),
-            [p2]: !!(validP2 && p2HasCE)
-        };
+    // Always use lowercased keys for statuses, but show original handles in UI
+    const statuses = {};
+    statuses[p1] = !!room.playerReady[String(p1).trim().toLowerCase()];
+    statuses[p2] = !!room.playerReady[String(p2).trim().toLowerCase()];
+    broadcastValidationStatus(room, {
+        pair,
+        statuses,
+        message
+    });
 
-        let message = 'Waiting for match creator and selected opponent to submit Compilation Error to the provided problem.';
-        if (!validP1 || !validP2) {
-            message = 'One of the selected participant handles is invalid on Codeforces.';
-        } else if (statuses[p1] && statuses[p2]) {
-            message = 'Both participants verified. Match starts in 15 seconds.';
-        } else if (!statuses[p1] && statuses[p2]) {
-            message = `Waiting for ${p1} to submit Compilation Error to the provided problem.`;
-        } else if (statuses[p1] && !statuses[p2]) {
-            message = `Waiting for ${p2} to submit Compilation Error to the provided problem.`;
-        }
-
-        broadcastValidationStatus(room, {
-            pair,
-            statuses,
-            message
+    if (ready1 && ready2 && !room.countdownInProgress) {
+        console.log(`[COUNTDOWN] Both players ready in room ${room.id}. Starting countdown.`);
+        room.countdownInProgress = true;
+        room.countdownEndsAt = Date.now() + MATCH_START_COUNTDOWN_MS;
+        ensureFirstProblemReady(room).catch((e) => { console.log('[DEBUG] ensureFirstProblemReady error:', e); });
+        sendToRoom(room, {
+            type: 'MATCH_COUNTDOWN_STARTED',
+            roomId: room.id,
+            startsAt: room.countdownEndsAt,
+            seconds: Math.round(MATCH_START_COUNTDOWN_MS / 1000),
+            pair: [p1, p2]
         });
-
-        if (validP1 && validP2 && statuses[p1] && statuses[p2] && !room.countdownInProgress) {
-            room.countdownInProgress = true;
-            room.countdownEndsAt = Date.now() + MATCH_START_COUNTDOWN_MS;
-            ensureFirstProblemReady(room).catch(() => {});
-
-            sendToRoom(room, {
-                type: 'MATCH_COUNTDOWN_STARTED',
-                roomId: room.id,
-                startsAt: room.countdownEndsAt,
-                seconds: 15,
-                pair: [p1, p2]
-            });
-
-            room.countdownTimeout = setTimeout(async () => {
-                const targetRoom = rooms.get(room.id);
-                if (!targetRoom) return;
-                if (targetRoom.battleState && targetRoom.battleState.status === 'running') return;
-
-                const { pair: livePair } = getAutoStartPair(targetRoom);
-                const canStartWithPair = !!livePair
-                    && livePair.length === 2
-                    && livePair[0] === p1
-                    && livePair[1] === p2;
-                if (!canStartWithPair) {
-                    targetRoom.countdownInProgress = false;
-                    targetRoom.countdownEndsAt = null;
-                    targetRoom.countdownTimeout = null;
-                    targetRoom.preGeneratedFirstProblem = null;
-                    await evaluateRoomValidationAndAutoStart(targetRoom);
-                    return;
-                }
-
-                targetRoom.startInProgress = true;
-                try {
-                    await startBattleForPair(targetRoom, p1, p2);
-                } catch (error) {
-                    console.error('Failed to start battle after countdown:', error);
-                } finally {
-                    targetRoom.startInProgress = false;
-                    targetRoom.countdownInProgress = false;
-                    targetRoom.countdownEndsAt = null;
-                    targetRoom.countdownTimeout = null;
-                }
-            }, MATCH_START_COUNTDOWN_MS);
+        // Server-side countdown: after 15s, start match regardless of client state
+        room.countdownTimeout = setTimeout(async () => {
+            const targetRoom = rooms.get(room.id);
+            if (!targetRoom) {
+                console.log('[DEBUG] Countdown timeout: targetRoom not found');
+                return;
+            }
+            if (targetRoom.battleState && targetRoom.battleState.status === 'running') {
+                console.log('[DEBUG] Countdown timeout: battle already running');
+                return;
+            }
+            // Always start match after countdown, even if no clients are connected
+            targetRoom.startInProgress = true;
+            try {
+                console.log(`[BATTLE] [SERVER] Starting battle for pair ${p1}, ${p2} in room ${room.id} after countdown (server-side)`);
+                await startBattleForPair(targetRoom, p1, p2);
+            } catch (error) {
+                console.error('Failed to start battle after countdown:', error);
+            } finally {
+                targetRoom.startInProgress = false;
+                targetRoom.countdownInProgress = false;
+                targetRoom.countdownEndsAt = null;
+                targetRoom.countdownTimeout = null;
+            }
+        }, MATCH_START_COUNTDOWN_MS);
+    } else {
+        if (!ready1 || !ready2) {
+            console.log('[DEBUG] Not both players ready:', { ready1, ready2, normP1, normP2, playerReady: room.playerReady });
         }
-    } catch (error) {
-        console.error('Validation auto-start check failed:', error);
-    } finally {
-        room.validationCheckInProgress = false;
+        if (room.countdownInProgress) {
+            console.log('[DEBUG] Countdown already in progress for room', room.id);
+        }
     }
 }
 
@@ -1940,6 +1987,7 @@ function scheduleRoomCleanup(room) {
         });
 
         rooms.delete(currentRoom.id);
+        saveRoomsToDisk(rooms);
         broadcastActiveRooms();
     }, delay);
 }
@@ -1992,6 +2040,7 @@ async function closeUnstartedRoom(room, message) {
     });
 
     rooms.delete(currentRoom.id);
+    saveRoomsToDisk(rooms);
 
     try {
         await clearStaleBracketRoomReference(currentRoom);
@@ -2004,7 +2053,7 @@ async function closeUnstartedRoom(room, message) {
 
 function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     if (!room || room.battleState) return false;
-    if (leftHandle !== room.host) return false;
+    if (normalizeHandle(leftHandle) !== normalizeHandle(room.host)) return false;
 
     return false;
 }
@@ -2046,6 +2095,7 @@ function createRoomWithSharedLogic({
             { handle: hostHandle, ws: hostWs }
         ],
         host: hostHandle,
+        hostHandle: hostHandle, // Ensure hostHandle property is set
         opponentHandle,
         duration,
         interval,
@@ -2073,6 +2123,7 @@ function createRoomWithSharedLogic({
     };
 
     rooms.set(roomId, room);
+    saveRoomsToDisk(rooms);
 
     room.noOpponentTimeout = setTimeout(async () => {
         const currentRoom = rooms.get(roomId);
@@ -2189,7 +2240,7 @@ wss.on('connection', (ws, req) => {
         try {
             const data = JSON.parse(message);
             const authenticatedHandle = String(ws.authHandle || '').trim();
-            
+            console.log('[DEBUG] WebSocket received message:', data.type, data);
             switch(data.type) {
                 case 'CREATE_ROOM':
                     if (!authenticatedHandle) {
@@ -2222,9 +2273,42 @@ wss.on('connection', (ws, req) => {
                     handleLeaveRoom(ws, data);
                     break;
                     
-                case 'START_BATTLE':
-                    handleStartBattle(ws, data);
+                case 'PLAYER_READY_TO_START':
+                    handlePlayerReadyToStart(ws, data);
                     break;
+// Handle player clicking start button
+function handlePlayerReadyToStart(ws, data) {
+    const room = rooms.get(data.roomId);
+    if (!room) {
+        console.log('[DEBUG] handlePlayerReadyToStart: Room not found for', data.roomId);
+        return;
+    }
+    // Print incoming data and all players for debug
+    console.log('[DEBUG] handlePlayerReadyToStart: incoming data:', data);
+    console.log('[DEBUG] handlePlayerReadyToStart: room.players:', room.players.map(p => ({ handle: p.handle, wsMatch: p.ws === ws })));
+
+    // Try to find sender by ws, fallback to handle if needed
+    let sender = room.players.find(player => player.ws === ws);
+    if (!sender && data.handle) {
+        sender = room.players.find(player => String(player.handle || '').trim().toLowerCase() === String(data.handle || '').trim().toLowerCase());
+        if (sender) {
+            console.log('[DEBUG] handlePlayerReadyToStart: Matched sender by handle:', sender.handle);
+        }
+    }
+    if (!sender || !sender.handle) {
+        console.log('[DEBUG] handlePlayerReadyToStart: Sender not found or missing handle');
+        return;
+    }
+    if (!room.playerReady) room.playerReady = {};
+    // Normalize handle for readiness (lowercase, trimmed)
+    const normalizedHandle = String(sender.handle || '').trim().toLowerCase();
+    room.playerReady[normalizedHandle] = true;
+    console.log(`[READY] ${sender.handle} marked ready (normalized: ${normalizedHandle}) in room ${room.id}`);
+    console.log('[DEBUG] Current playerReady:', JSON.stringify(room.playerReady));
+    // Extra debug: print all player handles in room
+    console.log('[DEBUG] All player handles in room:', room.players.map(p => p.handle));
+    evaluateRoomValidationAndAutoStart(room).catch((e) => { console.log('[DEBUG] evaluateRoomValidationAndAutoStart error:', e); });
+}
 
                 case 'END_BATTLE_EARLY':
                     handleEndBattleEarly(ws, data);
@@ -2289,6 +2373,18 @@ async function handleCreateRoom(ws, data) {
     const roomName = (data.roomName || '').trim() || `${data.handle}'s Room`;
     const opponentHandle = (data.opponentHandle || '').trim();
 
+    // Limit: max 100 rooms per user per 24h
+    const now = Date.now();
+    const cutoff = now - 24 * 60 * 60 * 1000;
+    const createdRooms = Array.from(rooms.values()).filter(r => normalizeHandle(r.hostHandle) === normalizeHandle(data.handle) && r.createdAt >= cutoff);
+    if (createdRooms.length >= 100) {
+        ws.send(JSON.stringify({
+            type: 'CREATE_ERROR',
+            message: 'Room creation limit reached (100 per 24 hours).'
+        }));
+        return;
+    }
+
     if (roomNameTaken(roomName)) {
         ws.send(JSON.stringify({
             type: 'CREATE_ERROR',
@@ -2305,7 +2401,7 @@ async function handleCreateRoom(ws, data) {
         return;
     }
 
-    if (opponentHandle === data.handle) {
+    if (normalizeHandle(opponentHandle) === normalizeHandle(data.handle)) {
         ws.send(JSON.stringify({
             type: 'CREATE_ERROR',
             message: 'Opponent handle must be different from your handle.'
@@ -2376,7 +2472,7 @@ async function handleProblemSolved(ws, data) {
     const problemNumber = data.problemNumber;
     if (!solverHandle || !problemId) return;
 
-    if (!room.players.some(player => player.handle === solverHandle)) return;
+    if (!room.players.some(player => normalizeHandle(player.handle) === normalizeHandle(solverHandle))) return;
 
     if (!room.battleState.solveAnnouncements) {
         room.battleState.solveAnnouncements = {};
@@ -2442,10 +2538,13 @@ async function handleProblemSolved(ws, data) {
                 updatedAt: Date.now()
             };
             targetRoom.breakAdvanceTimeout = null;
+            saveRoomsToDisk(rooms);
         }, 60000);
+        saveRoomsToDisk(rooms);
     }
 
     if (solvedProblemNumber < 1 || solvedProblemNumber >= totalProblems) {
+        saveRoomsToDisk(rooms);
         return;
     }
 
@@ -2496,6 +2595,7 @@ async function handleProblemSolved(ws, data) {
             problemNumber: nextProblemNumber,
             problem: nextProblem
         });
+        saveRoomsToDisk(rooms);
     } catch (error) {
         console.error('Failed to generate next problem:', error);
         sendToRoom(room, {
@@ -2537,26 +2637,30 @@ function handleJoinRoom(ws, data) {
     }
 
 
-    const existingIndex = room.players.findIndex(player => player.handle === data.handle);
+    const existingIndex = room.players.findIndex(player => normalizeHandle(player.handle) === normalizeHandle(data.handle));
     if (existingIndex !== -1) {
         room.players[existingIndex].ws = ws;
         ws.userHandle = data.handle;
         markHandleSeen(data.handle, Date.now());
-        
+        // Always send countdown and match state to reconnecting clients
         ws.send(JSON.stringify({
             type: 'REJOIN_SUCCESS',
             serverNow: Date.now(),
             roomId: room.id,
             roomData: getRoomPublicState(room),
-            isHost: room.host === data.handle
+            isHost: room.host === data.handle,
+            countdownInProgress: !!room.countdownInProgress,
+            countdownEndsAt: room.countdownEndsAt || null,
+            battleState: room.battleState || null
         }));
-        
         sendToRoom(room, {
             type: 'PLAYER_RECONNECTED',
             handle: data.handle,
-            players: room.players.filter(p => !!p.handle).map(p => p.handle)
+            players: room.players.filter(p => !!p.handle).map(p => p.handle),
+            countdownInProgress: !!room.countdownInProgress,
+            countdownEndsAt: room.countdownEndsAt || null,
+            battleState: room.battleState || null
         });
-        
         broadcastActiveRooms();
         return;
     }
@@ -2581,7 +2685,13 @@ function handleJoinRoom(ws, data) {
         type: 'PLAYER_JOINED',
         handle: data.handle,
         role: joinedRole,
-        players: room.players.filter(p => !!p.handle).map(p => p.handle)
+        players: room.players.filter(p => !!p.handle).map(p => p.handle),
+        roomId: room.id,
+        roomName: room.name,
+        duration: room.duration,
+        interval: room.interval,
+        problems: room.problems,
+        validationProblem: room.validationProblem
     });
     
     ws.send(JSON.stringify({
@@ -2618,7 +2728,7 @@ function handleRejoinRoom(ws, data) {
         return;
     }
     
-    const playerIndex = room.players.findIndex(player => player.handle === data.handle);
+    const playerIndex = room.players.findIndex(player => normalizeHandle(player.handle) === normalizeHandle(data.handle));
     if (playerIndex === -1) {
         ws.send(JSON.stringify({
             type: 'JOIN_ERROR',
@@ -2631,18 +2741,24 @@ function handleRejoinRoom(ws, data) {
     ws.userHandle = data.handle;
     markHandleSeen(data.handle, Date.now());
     
+    // Always send countdown and match state to reconnecting clients
     ws.send(JSON.stringify({
         type: 'REJOIN_SUCCESS',
         serverNow: Date.now(),
         roomId: room.id,
         roomData: getRoomPublicState(room),
-        isHost: room.host === data.handle
+        isHost: room.host === data.handle,
+        countdownInProgress: !!room.countdownInProgress,
+        countdownEndsAt: room.countdownEndsAt || null,
+        battleState: room.battleState || null
     }));
-    
     sendToRoom(room, {
         type: 'PLAYER_RECONNECTED',
         handle: data.handle,
-        players: room.players.filter(p => !!p.handle).map(p => p.handle)
+        players: room.players.filter(p => !!p.handle).map(p => p.handle),
+        countdownInProgress: !!room.countdownInProgress,
+        countdownEndsAt: room.countdownEndsAt || null,
+        battleState: room.battleState || null
     });
 
     evaluateRoomValidationAndAutoStart(room).catch(() => {});
@@ -2702,7 +2818,7 @@ async function handleStartBattle(ws, data) {
 
     ws.send(JSON.stringify({
         type: 'START_ERROR',
-        message: 'Auto-start enabled: battle will start immediately after two participants submit Compilation Error on generated problem.'
+        message: 'Both players must click Start Match to begin the battle.'
     }));
 }
 
@@ -2713,6 +2829,8 @@ function sendActiveRooms(ws) {
     .map(room => ({
         id: room.id,
         name: room.name,
+        hostHandle: room.hostHandle || '',
+        opponentHandle: room.opponentHandle || '',
         players: getConnectedPlayersCount(room),
         assignedPlayers: getAssignedPlayersCount(room),
         duration: room.duration,
@@ -2811,6 +2929,27 @@ app.post('/api/session/challenge', async (req, res) => {
             return;
         }
 
+        // BYPASS: If user is in bypass list, return a dummy challenge so frontend flow never breaks
+        const BYPASS_USERS = ['MITMAX', 'greed_y'];
+        if (BYPASS_USERS.map(h => h.toLowerCase()).includes(requestedHandle.toLowerCase())) {
+            res.json({
+                success: true,
+                challengeId: 'bypass-challenge',
+                expiresAt: Date.now() + 10 * 60 * 1000,
+                problem: {
+                    id: 'bypass',
+                    contestId: 0,
+                    index: 'A',
+                    name: 'Bypass User',
+                    rating: 0,
+                    url: '',
+                    generatedAtSec: Math.floor(Date.now() / 1000)
+                },
+                bypassed: true
+            });
+            return;
+        }
+
         const profile = await fetchCodeforcesUserProfile(requestedHandle);
         if (!profile) {
             res.status(400).json({ error: 'Invalid Codeforces handle' });
@@ -2849,6 +2988,23 @@ app.post('/api/session/login', async (req, res) => {
             return;
         }
 
+        // TEMP: Allow two specific users to bypass login verification, even if challengeId is present
+        const BYPASS_USERS = ['MITMAX', 'greed_y']; // <-- Replace with your actual handles
+        if (BYPASS_USERS.map(h => h.toLowerCase()).includes(requestedHandle.toLowerCase())) {
+            console.log(`Bypass login used for handle: ${requestedHandle}`);
+            destroyServerSession(req);
+            const session = createServerSession(requestedHandle);
+            if (!session) {
+                res.status(500).json({ error: 'Could not create session' });
+                return;
+            }
+            upsertProfileHandle(requestedHandle);
+            setSessionCookie(res, session.id);
+            res.json({ success: true, handle: session.handle, expiresAt: session.expiresAt, bypassed: true });
+            return;
+        }
+
+        // ...existing code for normal login flow...
         const challengeId = String(req.body?.challengeId || '').trim();
         if (!challengeId) {
             res.status(400).json({ error: 'challengeId is required' });
@@ -3402,6 +3558,17 @@ app.post('/api/brackets', async (req, res) => {
         const participants = normalizeParticipants(body.participants || []);
         const roomConfig = normalizeBracketRoomConfig(body.roomConfig || {});
 
+
+        // Limit: max 100 brackets per user per 24h
+        const now = Date.now();
+        const cutoff = now - 24 * 60 * 60 * 1000;
+        const allBrackets = await readBrackets();
+        const userBrackets = allBrackets.filter(b => normalizeHandle(b.ownerHandle) === normalizeHandle(ownerHandle) && new Date(b.createdAt).getTime() >= cutoff);
+        if (userBrackets.length >= 100) {
+            res.status(429).json({ error: 'Bracket creation limit reached (100 per 24 hours).' });
+            return;
+        }
+
         if (!ownerHandle) {
             res.status(401).json({ error: 'Login required' });
             return;
@@ -3412,10 +3579,62 @@ app.post('/api/brackets', async (req, res) => {
             return;
         }
 
+        if (participants.length > 1000) {
+            res.status(400).json({ error: 'Maximum 1000 participants allowed per bracket.' });
+            return;
+        }
+
         const supported = ['round-robin', 'single-elimination', 'double-elimination'];
         if (!supported.includes(type)) {
             res.status(400).json({ error: 'Unsupported tournament type' });
             return;
+        }
+
+        // Fetch Codeforces ratings for all participants
+        async function fetchCodeforcesProfiles(handles) {
+            const map = {};
+            if (!Array.isArray(handles) || handles.length === 0) return map;
+            const chunkSize = 80;
+            for (let i = 0; i < handles.length; i += chunkSize) {
+                const chunk = handles.slice(i, i + chunkSize);
+                try {
+                    const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(chunk.join(';'))}`);
+                    const data = await response.json();
+                    if (data.status !== 'OK' || !Array.isArray(data.result)) continue;
+                    data.result.forEach(user => {
+                        map[user.handle] = {
+                            rating: user.rating ?? null,
+                            maxRating: user.maxRating ?? null
+                        };
+                    });
+                } catch {}
+            }
+            return map;
+        }
+
+        function getRankClassByMaxRating(maxRating) {
+            const value = Number(maxRating);
+            if (!Number.isFinite(value)) return 'rank-newbie';
+            if (value >= 3000) return 'rank-lgm';
+            if (value >= 2600) return 'rank-gm';
+            if (value >= 2300) return 'rank-im';
+            if (value >= 2100) return 'rank-master';
+            if (value >= 1900) return 'rank-cm';
+            if (value >= 1600) return 'rank-expert';
+            if (value >= 1400) return 'rank-specialist';
+            if (value >= 1200) return 'rank-pupil';
+            return 'rank-newbie';
+        }
+
+        // Build handleProfiles: { handle: { rating, maxRating, rankClass } }
+        const handleProfiles = {};
+        const codeforcesProfiles = await fetchCodeforcesProfiles(participants);
+        for (const handle of participants) {
+            const profile = codeforcesProfiles[handle] || {};
+            const rating = profile.rating ?? null;
+            const maxRating = profile.maxRating ?? null;
+            const rankClass = getRankClassByMaxRating(maxRating);
+            handleProfiles[handle] = { rating, maxRating, rankClass };
         }
 
         const bracket = {
@@ -3427,7 +3646,8 @@ app.post('/api/brackets', async (req, res) => {
             roomConfig,
             usedProblemIds: [],
             matches: generateBracketMatches(type, participants),
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            handleProfiles
         };
 
         autoAdvanceBracketByes(bracket);
@@ -3582,6 +3802,75 @@ app.get('/:handle([A-Za-z0-9._-]{1,24})', (req, res, next) => {
 });
 
 Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
+        // Periodically check for break timer expiration and advance to next problem, even if no client is present
+        // Helper: Periodically check for break timer expiration and advance to next problem, even if no client is present
+        async function periodicBreakAdvanceCheck() {
+            for (const room of rooms.values()) {
+                if (!room.battleState || room.battleState.status !== 'running') continue;
+                const liveState = room.battleState.liveState || {};
+                const currentProblemNumber = Number(liveState.currentProblemNumber) || 0;
+                const totalProblems = (room.battleState.problemConfigs || room.problems || []).length;
+                const hasNextProblem = currentProblemNumber >= 1 && currentProblemNumber < totalProblems;
+                if (!hasNextProblem) continue;
+                // If in break, and breakEndsAt is reached, advance to next problem
+                if (liveState.breakEndsAt && Date.now() >= liveState.breakEndsAt) {
+                    const nextProblemNumber = currentProblemNumber + 1;
+                    const nextProblemIndex = nextProblemNumber - 1;
+                    if (!room.battleState.selectedProblems) {
+                        room.battleState.selectedProblems = Array.from({ length: totalProblems }, () => null);
+                    }
+                    let nextProblem = room.battleState.selectedProblems[nextProblemIndex];
+                    if (!nextProblem) {
+                        // Generate next problem if not already generated
+                        try {
+                            const problemConfigs = room.battleState.problemConfigs || room.problems || [];
+                            const targetConfig = problemConfigs[nextProblemIndex] || { points: 500, rating: 1200 };
+                            const usedProblemIds = Array.isArray(room.battleState.usedProblemIds)
+                                ? room.battleState.usedProblemIds
+                                : [];
+                            nextProblem = await generateRoomProblemForConfig(targetConfig, usedProblemIds);
+                            room.battleState.selectedProblems[nextProblemIndex] = nextProblem;
+                            if (!room.battleState.usedProblemIds.includes(nextProblem.id)) {
+                                room.battleState.usedProblemIds.push(nextProblem.id);
+                            }
+                            if (room.bracketId) {
+                                await reserveBracketProblemIds(room.bracketId, [nextProblem.id]);
+                            }
+                        } catch (error) {
+                            console.error('Failed to generate next problem (server-driven break advance):', error);
+                            continue;
+                        }
+                    }
+                    // Advance liveState to next problem
+                    room.battleState.liveState = {
+                        currentProblemNumber: nextProblemNumber,
+                        currentProblem: nextProblem,
+                        problemLocked: false,
+                        solvedBy: null,
+                        breakStartsAt: null,
+                        breakEndsAt: null,
+                        updatedAt: Date.now()
+                    };
+                    // Notify (if any clients join later)
+                    sendToRoom(room, {
+                        type: 'NEXT_PROBLEM_READY',
+                        roomId: room.id,
+                        problemNumber: nextProblemNumber,
+                        problem: nextProblem
+                    });
+                    saveRoomsToDisk(rooms);
+                }
+            }
+        }
+
+        setInterval(async () => {
+            await periodicBreakAdvanceCheck();
+        }, 2000); // Check every 2 seconds
+
+        // Also run the break advance check in all other intervals for robustness
+        setInterval(periodicBreakAdvanceCheck, 10 * 60 * 1000); // With session cleanup
+        setInterval(periodicBreakAdvanceCheck, 60 * 1000); // With session challenge cleanup
+        setInterval(periodicBreakAdvanceCheck, ROOM_VALIDATION_POLL_MS); // With validation poll
     setInterval(() => {
         cleanupExpiredSessions();
     }, 10 * 60 * 1000);
@@ -3595,6 +3884,157 @@ Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLast
             evaluateRoomValidationAndAutoStart(room).catch(() => {});
         });
     }, ROOM_VALIDATION_POLL_MS);
+
+    // Periodically check for match timer endings and process submissions even if no client is connected
+    setInterval(() => {
+        rooms.forEach(room => {
+            if (
+                room.battleState &&
+                room.battleState.status === 'running' &&
+                typeof room.battleState.endsAt === 'number' &&
+                Date.now() >= room.battleState.endsAt
+            ) {
+                // If the match timer has ended, process submissions and finalize the battle
+                verifyTimerEndSubmissions(room).catch((err) => {
+                    console.error('Periodic timer-end submission verification failed:', err);
+                    finalizeBattle(room, 'timer');
+                });
+            }
+        });
+    }, ROOM_VALIDATION_POLL_MS);
+
+    // Periodically check for problem solves during running matches (server-driven PROBLEM_SOLVED)
+    setInterval(async () => {
+        // Helper to persist a problem solve to results.json and bracket state
+        async function persistServerDrivenSolve(room, solverHandle, currentProblem, currentProblemNumber) {
+            try {
+                // Read current results
+                const resultsRaw = await fs.readFile(RESULTS_FILE, 'utf8');
+                let results = [];
+                try { results = JSON.parse(resultsRaw); } catch {}
+                // Find the match for this room
+                const match = results.find(m => m.roomId === room.id);
+                if (match && Array.isArray(match.problems)) {
+                    const prob = match.problems.find(p => p.id === (currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`));
+                    if (prob) {
+                        const nowSec = Math.floor(Date.now() / 1000);
+                        if (prob.p1Result && normalizeHandle(solverHandle) === normalizeHandle(room.battleState.player1Handle)) {
+                            prob.p1Result.solvedAtSec = nowSec;
+                        }
+                        if (prob.p2Result && normalizeHandle(solverHandle) === normalizeHandle(room.battleState.player2Handle)) {
+                            prob.p2Result.solvedAtSec = nowSec;
+                        }
+                        await fs.writeFile(RESULTS_FILE, JSON.stringify(results, null, 2));
+                    }
+                }
+                // Also update bracket state
+                await updateBracketMatchFromResult({
+                    roomId: room.id,
+                    winner: null, // winner is determined at match end
+                    player1: { handle: room.battleState.player1Handle },
+                    player2: { handle: room.battleState.player2Handle },
+                    date: new Date().toISOString()
+                });
+            } catch (err) {
+                console.error('Failed to persist server-driven solve:', err);
+            }
+        }
+
+        for (const room of rooms.values()) {
+            if (!room.battleState || room.battleState.status !== 'running') continue;
+            const liveState = room.battleState.liveState || {};
+            const currentProblemNumber = Number(liveState.currentProblemNumber) || 0;
+            const currentProblem = liveState.currentProblem
+                || room.battleState.selectedProblems?.[Math.max(0, currentProblemNumber - 1)]
+                || null;
+            if (!currentProblem || !currentProblem.id) continue;
+
+            const p1 = room.battleState.player1Handle;
+            const p2 = room.battleState.player2Handle;
+            if (!p1 || !p2) continue;
+
+            // Check if this problem is already solved
+            const problemWinnerKey = `${currentProblemNumber}:${currentProblem.id}`;
+            if (room.battleState.problemWinners && room.battleState.problemWinners[problemWinnerKey]) continue;
+
+            try {
+                const [p1Data, p2Data] = await Promise.all([
+                    fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p1)}&from=1&count=100`),
+                    fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p2)}&from=1&count=100`)
+                ]);
+                const p1Analysis = analyzeServerSubmissionsForProblem(p1Data, currentProblem);
+                const p2Analysis = analyzeServerSubmissionsForProblem(p2Data, currentProblem);
+
+                let solverHandle = null;
+                if (p1Analysis.accepted || p2Analysis.accepted) {
+                    if (!p2Analysis.accepted || (p1Analysis.accepted && p1Analysis.accepted.submitMs <= p2Analysis.accepted.submitMs)) {
+                        solverHandle = p1;
+                    } else {
+                        solverHandle = p2;
+                    }
+                }
+                if (solverHandle) {
+                    // Simulate handleProblemSolved logic (server-driven)
+                    if (!room.battleState.solveAnnouncements) room.battleState.solveAnnouncements = {};
+                    if (!room.battleState.problemWinners) room.battleState.problemWinners = {};
+                    if (room.battleState.problemWinners[problemWinnerKey]) return;
+                    room.battleState.problemWinners[problemWinnerKey] = solverHandle;
+                    const solveKey = `${currentProblem.id}:${solverHandle}`;
+                    if (room.battleState.solveAnnouncements[solveKey]) return;
+                    room.battleState.solveAnnouncements[solveKey] = true;
+                    sendToRoom(room, {
+                        type: 'PROBLEM_SOLVED',
+                        roomId: room.id,
+                        solverHandle,
+                        problemId: currentProblem.id,
+                        problemNumber: currentProblemNumber,
+                        solveKey
+                    });
+                    // Persist the solve to results.json and bracket state
+                    await persistServerDrivenSolve(room, solverHandle, currentProblem, currentProblemNumber);
+                    // Advance to next problem or update liveState as in handleProblemSolved
+                    const totalProblems = (room.battleState.problemConfigs || room.problems || []).length;
+                    const solvedProblemNumber = currentProblemNumber;
+                    const solvedProblemIndex = solvedProblemNumber - 1;
+                    const hasNextProblem = solvedProblemNumber >= 1 && solvedProblemNumber < totalProblems;
+                    const now = Date.now();
+                    room.battleState.liveState = {
+                        currentProblemNumber: solvedProblemNumber,
+                        currentProblem: room.battleState.selectedProblems?.[solvedProblemIndex] || null,
+                        problemLocked: true,
+                        solvedBy: solverHandle,
+                        breakStartsAt: hasNextProblem ? now : null,
+                        breakEndsAt: hasNextProblem ? now + 60000 : null,
+                        updatedAt: now
+                    };
+                    if (room.breakAdvanceTimeout) {
+                        clearTimeout(room.breakAdvanceTimeout);
+                        room.breakAdvanceTimeout = null;
+                    }
+                    if (hasNextProblem) {
+                        const nextProblemNumberForLiveState = solvedProblemNumber + 1;
+                        room.breakAdvanceTimeout = setTimeout(() => {
+                            const targetRoom = rooms.get(room.id);
+                            if (!targetRoom || !targetRoom.battleState || targetRoom.battleState.status !== 'running') return;
+                            const nextProblemIndexForLiveState = nextProblemNumberForLiveState - 1;
+                            targetRoom.battleState.liveState = {
+                                currentProblemNumber: nextProblemNumberForLiveState,
+                                currentProblem: targetRoom.battleState.selectedProblems?.[nextProblemIndexForLiveState] || null,
+                                problemLocked: false,
+                                solvedBy: null,
+                                breakStartsAt: null,
+                                breakEndsAt: null,
+                                updatedAt: Date.now()
+                            };
+                            targetRoom.breakAdvanceTimeout = null;
+                        }, 60000);
+                    }
+                }
+            } catch (err) {
+                // Ignore fetch errors
+            }
+        }
+    }, 5000); // Check every 5 seconds
 
     server.on('error', (error) => {
         if (error && error.code === 'EADDRINUSE') {

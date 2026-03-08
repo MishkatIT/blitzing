@@ -55,6 +55,12 @@
 
     function renderBracketProblems(scrollToIndex = null) {
         if (!bracketProblemsList) return;
+        // Update problem count
+        const bracketProblemsCount = document.getElementById('bracketProblemsCount');
+        if (bracketProblemsCount) {
+            bracketProblemsCount.textContent = `(${bracketProblems.length})`;
+        }
+
         const html = bracketProblems.map((problem, index) => {
             const ratingSelect = ratingOptions
                 .map(rating => `<option value="${rating}" ${rating === problem.rating ? 'selected' : ''}>${rating}</option>`)
@@ -107,6 +113,14 @@
             }
         }
     }
+
+    // Initial count update on load
+    document.addEventListener('DOMContentLoaded', () => {
+        const bracketProblemsCount = document.getElementById('bracketProblemsCount');
+        if (bracketProblemsCount) {
+            bracketProblemsCount.textContent = `(${bracketProblems.length})`;
+        }
+    });
 
     function getBracketRoomConfigFromInputs() {
         const normalizedProblems = normalizeProblemConfigs(bracketProblems);
@@ -664,20 +678,59 @@
         for (let index = 0; index < handles.length; index += chunkSize) {
             const chunk = handles.slice(index, index + chunkSize);
             try {
-                const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(chunk.join(';'))}`);
-                const data = await response.json();
-                if (data.status !== 'OK' || !Array.isArray(data.result)) continue;
+                // Prefer centralized CFUserInfo if available
+                if (window.CFUserInfo) {
+                    window.CFUserInfo.trackHandles(chunk);
+                    let waited = 0;
+                    let allFetched = false;
+                    while (waited < 2000) {
+                        let missing = false;
+                        for (const h of chunk) {
+                            const info = window.CFUserInfo.getInfo(h);
+                            if (!info || (info.rating === undefined && info.maxRating === undefined)) {
+                                missing = true;
+                                break;
+                            }
+                        }
+                        if (!missing) { allFetched = true; break; }
+                        await new Promise(res => setTimeout(res, 100));
+                        waited += 100;
+                    }
 
-                data.result.forEach(user => {
-                    map.set(user.handle, {
-                        rating: user.rating ?? null,
-                        maxRating: user.maxRating ?? null
+                    if (allFetched) {
+                        chunk.forEach(userHandle => {
+                            const info = window.CFUserInfo.getInfo(userHandle);
+                            if (!info) return;
+                            map.set(info.handle, {
+                                rating: info.rating ?? null,
+                                maxRating: info.maxRating ?? null
+                            });
+                            map.set(String(info.handle || '').toLowerCase(), {
+                                rating: info.rating ?? null,
+                                maxRating: info.maxRating ?? null
+                            });
+                        });
+                        continue;
+                    }
+                }
+
+                // No direct fallback to Codeforces API here — rely on centralized CFUserInfo only.
+                // If CFUserInfo didn't return all data within the short wait, use whatever partial
+                // info is available from CFUserInfo (if any) and skip direct API calls.
+                if (window.CFUserInfo) {
+                    chunk.forEach(userHandle => {
+                        const info = window.CFUserInfo.getInfo(userHandle);
+                        if (!info) return;
+                        map.set(info.handle, {
+                            rating: info.rating ?? null,
+                            maxRating: info.maxRating ?? null
+                        });
+                        map.set(String(info.handle || '').toLowerCase(), {
+                            rating: info.rating ?? null,
+                            maxRating: info.maxRating ?? null
+                        });
                     });
-                    map.set(String(user.handle || '').toLowerCase(), {
-                        rating: user.rating ?? null,
-                        maxRating: user.maxRating ?? null
-                    });
-                });
+                }
             } catch (error) {
                 console.warn('Rating lookup failed for chunk', chunk, error);
             }
@@ -686,32 +739,37 @@
         return map;
     }
 
-    function renderPlayer(handle, ratingsMap) {
+    // Accepts: handle, ratingsMap, handleProfiles (optional)
+    function renderPlayer(handle, ratingsMap, handleProfiles) {
         if (!handle) return 'TBD';
         if (/winner|loser|champion|slot|bye/i.test(handle)) {
             return escapeHtml(handle);
         }
 
-        const profile = ratingsMap?.get(handle) || ratingsMap?.get(String(handle).toLowerCase()) || null;
-        const safeHandle = escapeHtml(handle);
-        const currentRating = profile?.rating;
-        const maxRating = profile?.maxRating;
-        const rankClass = getRankClassByMaxRating(maxRating);
-        const currentText = Number.isFinite(Number(currentRating)) ? Number(currentRating) : '-';
-        const ultraLegendary = Number(maxRating) >= 4000;
-        const legendary = Number(maxRating) >= 3000;
-        const firstChar = safeHandle.charAt(0);
-        const restChars = safeHandle.slice(1);
-        let handleHtml = `<span class="player-handle-max ${rankClass}">${safeHandle}</span>`;
-        if (safeHandle.length > 1 && ultraLegendary) {
-            handleHtml = `<span class="player-handle-ultra-first">${firstChar}</span><span class="player-handle-ultra-rest">${restChars}</span>`;
-        } else if (safeHandle.length > 1 && legendary) {
-            handleHtml = `<span class="player-handle-legendary-first">${firstChar}</span><span class="player-handle-legendary-rest">${restChars}</span>`;
+        // Use centralized CFUserInfo if available
+        let info = window.CFUserInfo ? window.CFUserInfo.getInfo(handle) : null;
+        // Fallback to old logic if not found
+        if (!info) {
+            if (handleProfiles && handleProfiles[handle]) {
+                info = handleProfiles[handle];
+            } else {
+                info = ratingsMap?.get(handle) || ratingsMap?.get(String(handle).toLowerCase()) || {};
+            }
         }
+        // Track this handle for future updates
+        if (window.CFUserInfo) window.CFUserInfo.trackHandles([handle]);
 
+        // Always use canonical case from CFUserInfo if available
+        const displayHandle = info.handle || handle;
+        const safeHandle = escapeHtml(displayHandle);
+        const currentRating = info.rating;
+        const currentText = currentRating !== null && currentRating !== undefined ? Number(currentRating) : '-';
+
+        // Use centralized rendering for handle coloring (LGM/Ultra-LGM logic)
+        let handleHtml = window.CFUserInfo ? window.CFUserInfo.renderHandleHtml(displayHandle) : `<span>${safeHandle}</span>`;
         // Wrap handleHtml in a link to Codeforces profile
-        const cfProfileUrl = `https://codeforces.com/profile/${encodeURIComponent(safeHandle)}`;
-        const handleLink = `<a href="${cfProfileUrl}" class="player-handle-link" target="_blank" rel="noopener noreferrer">${handleHtml}</a>`;
+        const cfProfileUrl = `https://codeforces.com/profile/${encodeURIComponent(displayHandle)}`;
+        const handleLink = `<a href="${escapeHtml(cfProfileUrl)}" class="player-handle-link" data-handle="${encodeURIComponent(handle)}" target="_blank" rel="noopener noreferrer">${handleHtml}</a>`;
 
         return `
             <span class="player-chip">
@@ -726,6 +784,24 @@
         return `results.html?roomId=${encodeURIComponent(match.roomId)}`;
     }
 
+    function getDisplayHandleSimple(handle) {
+        if (!handle) return '';
+        if (window.CFUserInfo) {
+            const info = window.CFUserInfo.getInfo(handle);
+            return (info && info.handle) ? info.handle : handle;
+        }
+        return handle;
+    }
+
+    function renderHandleLinkSimple(handle) {
+        if (!handle) return '<span>-</span>';
+        const display = getDisplayHandleSimple(handle) || handle;
+        const safeDisplay = escapeHtml(display);
+        const profileUrl = `https://codeforces.com/profile/${encodeURIComponent(display)}`;
+        const handleHtml = window.CFUserInfo ? window.CFUserInfo.renderHandleHtml(display) : `<span>${safeDisplay}</span>`;
+        return `<a href="${escapeHtml(profileUrl)}" class="player-handle-link player-handle-simple" data-handle="${encodeURIComponent(handle)}" target="_blank" rel="noopener noreferrer">${handleHtml}</a>`;
+    }
+
     function getMatchPointsSummary(match) {
         const p1 = match?.result?.player1Score;
         const p2 = match?.result?.player2Score;
@@ -733,10 +809,10 @@
         const right = Number.isFinite(Number(p2)) ? Number(p2) : null;
 
         if (left === null && right === null) {
-            return `${match?.p1 || 'P1'}: - · ${match?.p2 || 'P2'}: -`;
+            return `${getDisplayHandleSimple(match?.p1) || 'P1'}: - · ${getDisplayHandleSimple(match?.p2) || 'P2'}: -`;
         }
 
-        return `${match?.p1 || 'P1'}: ${left ?? '-'} · ${match?.p2 || 'P2'}: ${right ?? '-'}`;
+        return `${getDisplayHandleSimple(match?.p1) || 'P1'}: ${left ?? '-'} · ${getDisplayHandleSimple(match?.p2) || 'P2'}: ${right ?? '-'}`;
     }
 
     async function renderBracketPreview(bracket) {
@@ -753,7 +829,7 @@
             const roundColors = getRoundColorVars(group.round);
             const matches = group.matches.map(match => {
                 const status = match.status === 'completed'
-                    ? `Winner: ${match.winner || '-'}`
+                    ? `Winner: ${renderHandleLinkSimple(match.winner)}` 
                     : match.roomId
                         ? `Room: ${match.roomId}`
                         : 'Pending';
@@ -794,6 +870,8 @@
                 ${standingsHtml}
             </div>
         `;
+        // Refresh handles to canonical CF case where available
+        if (typeof refreshDisplayedHandles === 'function') refreshDisplayedHandles(outputContent);
         drawAllTreeConnections();
     }
 
@@ -810,13 +888,16 @@
                 return;
             }
 
-            const ratingsMap = await fetchRatingsMap(getAllConcreteHandles(brackets));
-
             const myHandle = getCurrentHandle();
             const cards = brackets.map(bracket => {
+                // Use stored handleProfiles for saved brackets
+                const handleProfiles = bracket.handleProfiles || {};
+                // Use a dummy Map for ratingsMap to keep renderPlayer signature
+                const ratingsMap = new Map();
                 const isExpanded = expandedBracketIds.has(bracket.id);
                 const groups = groupMatches(bracket.matches || []);
-                const standingsHtml = renderStandingsPanel(bracket, ratingsMap);
+                // Standings panel: pass handleProfiles as 3rd arg
+                const standingsHtml = renderStandingsPanel(bracket, ratingsMap, handleProfiles);
                 const matchesHtml = groups.map(group => {
                     const roundColors = getRoundColorVars(group.round);
                     const items = group.matches.map(match => {
@@ -828,13 +909,14 @@
                         const canCreateMatchRoom = !!mine && (isAdminHandle(myHandle) || mine === p1 || mine === p2);
                         const createDisabled = !ready || completed || !canCreateMatchRoom;
                         const createLabel = completed
-                            ? `Winner: ${match.winner || '-'}`
+                            ? `Winner: ${renderHandleLinkSimple(match.winner)}`
                             : match.roomId
                                 ? `Open Room ${match.roomId}`
                                 : 'Create Match Room';
 
-                        const p1Text = renderPlayer(match.p1, ratingsMap);
-                        const p2Text = renderPlayer(match.p2, ratingsMap);
+                        // Use handleProfiles for saved brackets
+                        const p1Text = renderPlayer(match.p1, ratingsMap, handleProfiles);
+                        const p2Text = renderPlayer(match.p2, ratingsMap, handleProfiles);
                         const historyUrl = getMatchHistoryUrl(match);
                         const pointsText = getMatchPointsSummary(match);
 
@@ -868,7 +950,7 @@
                     `;
                 }).join('');
 
-                const canDeleteAsOwner = myHandle && bracket.ownerHandle === myHandle;
+                const canDeleteAsOwner = myHandle && normalizeHandleToken(bracket.ownerHandle) === normalizeHandleToken(myHandle);
                 const canDelete = !!canDeleteAsOwner || isAdminHandle(myHandle);
 
                 return `
@@ -898,12 +980,52 @@
             }).join('');
 
             savedBracketsList.innerHTML = cards;
+            // Refresh handles in saved cards to canonical CF case where available
+            if (typeof refreshDisplayedHandles === 'function') refreshDisplayedHandles(savedBracketsList);
             drawAllTreeConnections();
         } catch (error) {
             console.error('Failed to load brackets:', error);
             savedBracketsList.innerHTML = '<p class="note">Could not load brackets right now.</p>';
         }
     }
+
+    // Update player handle links inside a container to use CF canonical case when available
+    function refreshDisplayedHandles(container) {
+        if (!container) container = document;
+        if (!window.CFUserInfo) return;
+        const links = container.querySelectorAll('.player-handle-link');
+        links.forEach(a => {
+            const raw = a.getAttribute('data-handle');
+            if (!raw) return;
+            let original;
+            try { original = decodeURIComponent(raw); } catch (e) { original = raw; }
+            const info = window.CFUserInfo.getInfo(original);
+            const display = info && info.handle ? info.handle : original;
+            const newHtml = window.CFUserInfo ? window.CFUserInfo.renderHandleHtml(display) : `<span>${escapeHtml(display)}</span>`;
+            a.innerHTML = newHtml;
+            a.href = `https://codeforces.com/profile/${encodeURIComponent(display)}`;
+        });
+    }
+
+    // Subscribe to CFUserInfo updates so we can refresh handles automatically
+    (function ensureCFSubscription() {
+        const doSubscribe = () => {
+            if (window.CFUserInfo && typeof window.CFUserInfo.subscribe === 'function') {
+                window.CFUserInfo.subscribe(() => {
+                    refreshDisplayedHandles(outputContent);
+                    refreshDisplayedHandles(savedBracketsList);
+                });
+                return true;
+            }
+            return false;
+        };
+        if (!doSubscribe()) {
+            const start = Date.now();
+            const iv = setInterval(() => {
+                if (doSubscribe() || Date.now() - start > 5000) clearInterval(iv);
+            }, 200);
+        }
+    })();
 
     async function generateBracket() {
         const ownerHandle = getCurrentHandle();
