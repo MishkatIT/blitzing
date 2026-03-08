@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PUC Blitz Cup · Results Archive</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <link rel="stylesheet" href="../css/results.css">
+    <link rel="stylesheet" href="../css/floating-scrollbar.css">
+</head>
+<body>
+    <div class="container">
+        <div class="quick-nav">
+            <a href="index.html" class="quick-nav-btn">Arena</a>
+            <!-- <a href="index.html#roomControls" class="quick-nav-btn">Rooms</a> -->
+            <!-- <a href="index.html#activeBlitzSection" class="quick-nav-btn">Active</a> -->
+            <a href="bracket.html" class="quick-nav-btn">Bracket</a>
+            <a href="headtohead.html" class="quick-nav-btn">Head-to-Head</a>
+            <a href="profile.html" class="quick-nav-btn">Profile</a>
+            <a href="leaderboard.html" class="quick-nav-btn">Global Leaderboard</a>
+            <a href="results.html" class="quick-nav-btn">Results</a>
+            <a href="feedback.html" class="quick-nav-btn">Feedback</a>
+            <div class="quick-nav-account">
+                <a href="index.html?login=1" class="global-handle-chip not-verified" data-global-handle-chip>Login</a>
+            </div>
+        </div>
+
+        <div class="blitz-header">
+            <div>
+                <h1>Results Archive</h1>
+                <p class="subtitle">Recent blitz history and player outcomes</p>
+            </div>
+        </div>
+
+        <div class="results-top-actions">
+            <input type="text" id="resultsSearchInput" class="results-search-input" placeholder="Search by handle, room ID, winner, blitz #">
+            <button class="clear-btn" id="clearAllBtn">Clear All</button>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <h3>Total Matches</h3>
+                <div class="stat-number" id="totalMatches">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Best Win Rate (min 3)</h3>
+                <div class="stat-number" id="mostWins">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Average Score</h3>
+                <div class="stat-number" id="avgScore">0</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th>Blitz</th>
+                        <th>Date & Time</th>
+                        <th>Player 1</th>
+                        <th>Score</th>
+                        <th>Player 2</th>
+                        <th>Score</th>
+                        <th>Winner</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="password-modal" id="adminPasswordModal">
+        <div class="password-content">
+            <h2>Admin Access</h2>
+            <p>Enter admin PIN to clear all results:</p>
+            <input type="password" class="password-input" id="adminPasswordInput" placeholder="Enter password">
+            <div class="password-buttons">
+                <button class="password-btn confirm-btn" id="confirmAdminPassword">Confirm</button>
+                <button class="password-btn cancel-btn" id="cancelAdminPassword">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="detailModal">
+        <div class="modal-content">
+            <h2 id="modalTitle">Blitz Details</h2>
+            <div id="modalContent"></div>
+            <button class="close-btn" id="closeModal">Close</button>
+        </div>
+    </div>
+
+    <div class="modal" id="userStatsModal">
+        <div class="modal-content">
+            <h2 id="userStatsTitle">User Stats</h2>
+            <div id="userStatsContent"></div>
+            <button class="close-btn" id="closeUserStatsModal">Close</button>
+        </div>
+    </div>
+
+    <div class="password-modal" id="userProfileModal">
+        <div class="password-content user-profile-content">
+            <h2>User Profile</h2>
+            <div id="userProfileBody" class="user-profile-body">Click on a verified handle to view profile details.</div>
+            <div class="password-buttons user-profile-actions">
+                <button class="password-btn user-profile-logout-btn" id="userProfileLogoutBtn" style="display:none;">Logout</button>
+                <button class="password-btn cancel-btn" id="closeUserProfileModal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
+        <p class="site-version">v3.1</p>
+        <p>
+            Developers:
+            <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,
+            <a href="https://codeforces.com/profile/MishkatIT" target="_blank" rel="noopener noreferrer">Mishkat</a>
+            | Tester: <a href="https://codeforces.com/profile/dip.barua" target="_blank" rel="noopener noreferrer">Dip</a>
+        </p>
+    </footer>
+
+    <script src="../js/global-profile-presence.js"></script>
+    <script>
+        const API_BASE_URL = window.location.origin;
+        const WS_URL = window.location.origin.replace('http', 'ws');
+        const OWNER_KEY = 'blitzUserHandle';
+        const ADMIN_HANDLES = new Set(['else_if_tridib21', 'mishkatit']);
+        let ws = null;
+        let refreshTimer = null;
+
+        const modal = document.getElementById('detailModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalContent = document.getElementById('modalContent');
+        const closeModal = document.getElementById('closeModal');
+
+        const adminPasswordModal = document.getElementById('adminPasswordModal');
+        const adminPasswordInput = document.getElementById('adminPasswordInput');
+        const confirmAdminPassword = document.getElementById('confirmAdminPassword');
+        const cancelAdminPassword = document.getElementById('cancelAdminPassword');
+        const userStatsModal = document.getElementById('userStatsModal');
+        const userStatsTitle = document.getElementById('userStatsTitle');
+        const userStatsContent = document.getElementById('userStatsContent');
+        const closeUserStatsModal = document.getElementById('closeUserStatsModal');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const resultsSearchInput = document.getElementById('resultsSearchInput');
+        const focusRoomId = (new URLSearchParams(window.location.search).get('roomId') || '').trim().toUpperCase();
+        const focusHandle = (new URLSearchParams(window.location.search).get('handle') || '').trim();
+        const focusHandleNormalized = focusHandle.toLowerCase();
+        let searchQuery = '';
+        let focusedMatchModalOpened = false;
+        let cachedResults = [];
+
+        function getCurrentHandle() {
+            return (localStorage.getItem(OWNER_KEY) || '').trim();
+        }
+
+        function isAdminHandle(handle) {
+            return ADMIN_HANDLES.has(String(handle || '').trim().toLowerCase());
+        }
+
+        function syncAdminOnlyUiVisibility() {
+            if (!clearAllBtn) return;
+            clearAllBtn.style.display = isAdminHandle(getCurrentHandle()) ? 'inline-flex' : 'none';
+        }
+
+        function getRankColor(rank) {
+            const colors = {
+                'Newbie': '#8a8f99',
+                'Pupil': '#74ca77',
+                'Specialist': '#4bc7b8',
+                'Expert': '#6ea8fe',
+                'Candidate Master': '#c67bf3',
+                'Master': '#ffb86a',
+                'International Master': '#ffb86a',
+                'Grandmaster': '#ff7d7d',
+                'Legendary Grandmaster': '#ff7d7d'
+            };
+            return colors[rank] || '#f3f5f8';
+        }
+
+        function normalizeProblemResultEntry(entry) {
+            const source = entry && typeof entry === 'object' ? entry : {};
+            const attempts = Math.max(0, Number(source.attempts) || 0);
+            const solved = !!source.solved;
+            const pending = !!source.pending && !solved;
+            const solvedAtSecRaw = Number(source.solvedAtSec);
+            const solvedAtSec = Number.isFinite(solvedAtSecRaw) && solvedAtSecRaw >= 0
+                ? Math.floor(solvedAtSecRaw)
+                : null;
+
+            return {
+                attempts,
+                solved,
+                pending,
+                solvedAtSec
+            };
+        }
+
+        function formatElapsedTime(seconds) {
+            const total = Math.max(0, Math.floor(Number(seconds) || 0));
+            const mins = Math.floor(total / 60).toString().padStart(2, '0');
+            const secs = Math.floor(total % 60).toString().padStart(2, '0');
+            return `${mins}:${secs}`;
+        }
+
+        function buildProblemStatusMarkup(resultEntry) {
+            const result = normalizeProblemResultEntry(resultEntry);
+
+            if (result.solved) {
+                const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
+                const timeHtml = Number.isFinite(result.solvedAtSec)
+                    ? `<span class="result-problem-status-time">${formatElapsedTime(result.solvedAtSec)}</span>`
+                    : '';
+                return `<span class="result-problem-status status-ac"><span class="result-problem-status-main">${acLabel}</span>${timeHtml}</span>`;
+            }
+
+            if (result.pending) {
+                return `<span class="result-problem-status status-pending"><span class="result-problem-status-main">?<span class="result-problem-loader" aria-hidden="true"></span></span></span>`;
+            }
+
+            if (result.attempts > 0) {
+                return `<span class="result-problem-status status-wa"><span class="result-problem-status-main">-${result.attempts}</span></span>`;
+            }
+
+            return `<span class="result-problem-status status-none"><span class="result-problem-status-main">—</span></span>`;
+        }
+
+        function buildLeaderboardProblemCell(resultEntry) {
+            const result = normalizeProblemResultEntry(resultEntry);
+
+            if (result.solved) {
+                const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
+                const solveTimeHtml = Number.isFinite(result.solvedAtSec)
+                    ? `<div class="problem-cell-sub">${formatElapsedTime(result.solvedAtSec)}</div>`
+                    : '';
+                return `<td class="problem-cell status-ac"><div class="problem-cell-main">${acLabel}</div>${solveTimeHtml}</td>`;
+            }
+
+            if (result.pending) {
+                return `<td class="problem-cell status-pending"><div class="problem-cell-main pending-main">?<span class="pending-loader" aria-hidden="true"></span></div></td>`;
+            }
+
+            if (result.attempts > 0) {
+                return `<td class="problem-cell status-wa"><div class="problem-cell-main">-${result.attempts}</div></td>`;
+            }
+
+            return `<td class="problem-cell status-none"><div class="problem-cell-main">—</div></td>`;
+        }
+
+        function buildResultLeaderboardMarkup(result) {
+            const problems = Array.isArray(result?.problems) ? result.problems : [];
+
+            const p1Handle = String(result?.player1?.handle || 'Player 1');
+            const p2Handle = String(result?.player2?.handle || 'Player 2');
+            const p1Rank = String(result?.player1?.rank || 'Unrated');
+            const p2Rank = String(result?.player2?.rank || 'Unrated');
+            const p1Score = Number(result?.player1?.score) || 0;
+            const p2Score = Number(result?.player2?.score) || 0;
+
+            const headerCells = problems.map((problem, index) => {
+                const points = Number(problem?.points) || 0;
+                const problemUrl = problem?.url || (problem?.contestId && problem?.index
+                    ? `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`
+                    : '');
+                const problemName = String(problem?.name || `Problem ${index + 1}`);
+                const problemLabel = problemUrl
+                    ? `<a href="${problemUrl}" target="_blank" rel="noopener noreferrer" class="problem-link" title="${problemName}">P${index + 1}</a>`
+                    : `P${index + 1}`;
+                return `<th>${problemLabel}<br><small>${points}pts</small></th>`;
+            }).join('');
+
+            const p1Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p1Result)).join('');
+            const p2Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p2Result)).join('');
+
+
+            // At match start, both players should be shown as rank 1
+            let p1Standing = '#1';
+            let p2Standing = '#1';
+            // If the match is finished, show actual standings
+            const standing = getStandingFromResult(result);
+            if (standing.label === 'P1') {
+                p1Standing = '#1';
+                p2Standing = '#2';
+            } else if (standing.label === 'P2') {
+                p1Standing = '#2';
+                p2Standing = '#1';
+            } else if (standing.label === 'TIE') {
+                p1Standing = '#1';
+                p2Standing = '#1';
+            }
+
+            return `
+                <h3 class="modal-subtitle">Standings</h3>
+                <div class="result-leaderboard-wrap">
+                    <table class="leaderboard-table result-leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Player</th>
+                                <th>Rank</th>
+                                <th>Total</th>
+                                ${headerCells}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <a href="https://codeforces.com/profile/${encodeURIComponent(p1Handle)}" target="_blank" rel="noopener noreferrer" class="player-link" style="color: ${getRankColor(p1Rank)};"><strong>${p1Handle}</strong></a>
+                                    <div class="leaderboard-cf-rank" style="color: ${getRankColor(p1Rank)};">${p1Rank}</div>
+                                </td>
+                                <td><span class="leaderboard-standing">${p1Standing}</span></td>
+                                <td><strong class="result-total-score">${p1Score}</strong></td>
+                                ${p1Cells}
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="https://codeforces.com/profile/${encodeURIComponent(p2Handle)}" target="_blank" rel="noopener noreferrer" class="player-link" style="color: ${getRankColor(p2Rank)};"><strong>${p2Handle}</strong></a>
+                                    <div class="leaderboard-cf-rank" style="color: ${getRankColor(p2Rank)};">${p2Rank}</div>
+                                </td>
+                                <td><span class="leaderboard-standing">${p2Standing}</span></td>
+                                <td><strong class="result-total-score">${p2Score}</strong></td>
+                                ${p2Cells}
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function loadResults() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/results`);
+                const results = await response.json();
+                cachedResults = Array.isArray(results) ? results : [];
+                refreshResultsView();
+            } catch (error) {
+                console.error('Error loading results:', error);
+                document.getElementById('resultsBody').innerHTML =
+                    '<tr><td colspan="8" class="no-data">No results found. Start a blitz match first.</td></tr>';
+            }
+        }
+
+        function refreshResultsView() {
+            const filteredResults = getFilteredResults(cachedResults);
+            displayStats(filteredResults);
+            displayResults(cachedResults);
+        }
+
+        function getFilteredResults(results) {
+            return results.filter(item => {
+                const p1 = String(item?.player1?.handle || '').toLowerCase();
+                const p2 = String(item?.player2?.handle || '').toLowerCase();
+
+                if (focusHandle && p1 !== focusHandleNormalized && p2 !== focusHandleNormalized) {
+                    return false;
+                }
+
+                if (!searchQuery) {
+                    return true;
+                }
+
+                const winner = String(item?.winner || '').toLowerCase();
+                const roomId = String(item?.roomId || '').toLowerCase();
+                const blitzNumber = String(item?.blitzNumber || '').toLowerCase();
+                const date = item?.date ? new Date(item.date).toLocaleString().toLowerCase() : '';
+                const searchableText = `${p1} ${p2} ${winner} ${roomId} ${blitzNumber} ${date}`;
+                return searchableText.includes(searchQuery);
+            });
+        }
+
+        function connectResultsSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'RESULTS_UPDATED') {
+                        loadResults();
+                    }
+                } catch (error) {
+                    console.error('Socket parse error:', error);
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectResultsSocket, 2000);
+            };
+        }
+
+        function startAutoRefresh() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(loadResults, 5000);
+        }
+
+        function displayStats(results) {
+            const totalMatches = results.length;
+            document.getElementById('totalMatches').textContent = totalMatches;
+
+            const bestWinRateEl = document.getElementById('mostWins');
+            const avgScoreEl = document.getElementById('avgScore');
+
+            if (totalMatches === 0) {
+                bestWinRateEl.textContent = '-';
+                avgScoreEl.textContent = '0';
+                return;
+            }
+
+            if (focusHandle) {
+                const stats = buildUserStats(focusHandle, results);
+                bestWinRateEl.textContent = `${stats.handle} (${stats.winRate}% · ${stats.wins}/${stats.played})`;
+                const totalFocusedScore = results.reduce((sum, match) => {
+                    const p1 = String(match?.player1?.handle || '').toLowerCase();
+                    const p2 = String(match?.player2?.handle || '').toLowerCase();
+                    if (p1 === focusHandleNormalized) return sum + (Number(match?.player1?.score) || 0);
+                    if (p2 === focusHandleNormalized) return sum + (Number(match?.player2?.score) || 0);
+                    return sum;
+                }, 0);
+                const focusedAvg = totalMatches > 0 ? (totalFocusedScore / totalMatches) : 0;
+                avgScoreEl.textContent = focusedAvg.toFixed(1);
+                return;
+            }
+
+            const playerStats = {};
+            for (const match of results) {
+                const p1 = match?.player1?.handle;
+                const p2 = match?.player2?.handle;
+
+                if (p1) {
+                    if (!playerStats[p1]) playerStats[p1] = { wins: 0, played: 0 };
+                    playerStats[p1].played += 1;
+                }
+
+                if (p2) {
+                    if (!playerStats[p2]) playerStats[p2] = { wins: 0, played: 0 };
+                    playerStats[p2].played += 1;
+                }
+
+                if (match.winner && match.winner !== 'tie') {
+                    if (!playerStats[match.winner]) {
+                        playerStats[match.winner] = { wins: 0, played: 0 };
+                    }
+                    playerStats[match.winner].wins += 1;
+                }
+            }
+
+            const MIN_MATCHES_FOR_RATE = 3;
+            let candidates = Object.entries(playerStats)
+                .map(([handle, stat]) => ({
+                    handle,
+                    wins: stat.wins,
+                    played: stat.played,
+                    rate: stat.played > 0 ? stat.wins / stat.played : 0
+                }))
+                .filter(item => item.played >= MIN_MATCHES_FOR_RATE);
+
+            if (candidates.length === 0) {
+                candidates = Object.entries(playerStats)
+                    .map(([handle, stat]) => ({
+                        handle,
+                        wins: stat.wins,
+                        played: stat.played,
+                        rate: stat.played > 0 ? stat.wins / stat.played : 0
+                    }))
+                    .filter(item => item.played > 0);
+            }
+
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => {
+                    if (b.rate !== a.rate) return b.rate - a.rate;
+                    if (b.played !== a.played) return b.played - a.played;
+                    return b.wins - a.wins;
+                });
+
+                const best = candidates[0];
+                const ratePct = (best.rate * 100).toFixed(1);
+                bestWinRateEl.textContent = `${best.handle} (${ratePct}% · ${best.wins}/${best.played})`;
+            } else {
+                bestWinRateEl.textContent = '-';
+            }
+
+            const avgScore = results.reduce((sum, r) => sum + r.player1.score + r.player2.score, 0) / (totalMatches * 2);
+            avgScoreEl.textContent = avgScore.toFixed(1);
+        }
+
+        function buildUserStats(handle, results) {
+            const target = String(handle || '').trim();
+            const targetNorm = target.toLowerCase();
+            const entries = (results || []).filter(match => {
+                const p1 = String(match?.player1?.handle || '').toLowerCase();
+                const p2 = String(match?.player2?.handle || '').toLowerCase();
+                return p1 === targetNorm || p2 === targetNorm;
+            });
+
+            let wins = 0;
+            let losses = 0;
+            let ties = 0;
+            let scoreSum = 0;
+            const opponents = new Map();
+
+            entries.forEach(match => {
+                const p1 = match?.player1?.handle;
+                const p2 = match?.player2?.handle;
+                const winner = match?.winner;
+
+                const winnerNorm = String(winner || '').toLowerCase();
+                if (winnerNorm === 'tie') ties += 1;
+                else if (winnerNorm === targetNorm) wins += 1;
+                else losses += 1;
+
+                if (String(p1 || '').toLowerCase() === targetNorm) scoreSum += Number(match?.player1?.score) || 0;
+                if (String(p2 || '').toLowerCase() === targetNorm) scoreSum += Number(match?.player2?.score) || 0;
+
+                const opp = String(p1 || '').toLowerCase() === targetNorm ? p2 : p1;
+                if (opp) opponents.set(opp, (opponents.get(opp) || 0) + 1);
+            });
+
+            const played = entries.length;
+            const winRate = played > 0 ? ((wins / played) * 100).toFixed(1) : '0.0';
+            const avgScore = played > 0 ? (scoreSum / played).toFixed(1) : '0.0';
+            const opponentList = Array.from(opponents.entries()).sort((a, b) => b[1] - a[1]);
+
+            return { handle: target, played, wins, losses, ties, winRate, avgScore, opponentList };
+        }
+
+        function getStandingFromResult(result) {
+            const winner = String(result?.winner || '').trim().toLowerCase();
+            const p1 = String(result?.player1?.handle || '').trim().toLowerCase();
+            const p2 = String(result?.player2?.handle || '').trim().toLowerCase();
+
+            if (winner === 'tie') {
+                return { label: 'TIE', className: 'standing-tie' };
+            }
+            if (winner && winner === p1) {
+                return { label: 'P1', className: 'standing-p1' };
+            }
+            if (winner && winner === p2) {
+                return { label: 'P2', className: 'standing-p2' };
+            }
+            return { label: '—', className: 'standing-none' };
+        }
+
+        function openUserStats(handle) {
+            const stats = buildUserStats(handle, cachedResults);
+            userStatsTitle.textContent = `${stats.handle} · Stats`;
+
+            const opponentsHtml = stats.opponentList.length > 0
+                ? stats.opponentList.map(([opp, count]) => `<a href="#" class="stats-user-link" data-handle="${opp}">${opp}</a> (${count})`).join(', ')
+                : 'No match history yet.';
+
+            userStatsContent.innerHTML = `
+                <div class="user-stats-grid">
+                    <div class="user-stats-item"><span>Played</span><strong>${stats.played}</strong></div>
+                    <div class="user-stats-item"><span>Wins</span><strong>${stats.wins}</strong></div>
+                    <div class="user-stats-item"><span>Losses</span><strong>${stats.losses}</strong></div>
+                    <div class="user-stats-item"><span>Ties</span><strong>${stats.ties}</strong></div>
+                    <div class="user-stats-item"><span>Win Rate</span><strong>${stats.winRate}%</strong></div>
+                    <div class="user-stats-item"><span>Avg Score</span><strong>${stats.avgScore}</strong></div>
+                </div>
+                <p style="margin-top:10px;"><strong>Played with:</strong> ${opponentsHtml}</p>
+                <p style="margin-top:8px;"><a class="stats-user-link" href="results.html?handle=${encodeURIComponent(stats.handle)}">History of ${stats.handle}</a></p>
+            `;
+
+            userStatsModal.style.display = 'flex';
+        }
+
+        function displayResults(results) {
+            const tbody = document.getElementById('resultsBody');
+            const filtered = getFilteredResults(results);
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="no-data">No results found. Start a blitz match first.</td></tr>';
+                return;
+            }
+
+
+            const orderedResults = [...filtered].sort((a, b) => {
+                const aNum = Number(a.blitzNumber) || 0;
+                const bNum = Number(b.blitzNumber) || 0;
+                if (bNum !== aNum) return bNum - aNum;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            });
+
+            let focusedResult = null;
+            tbody.innerHTML = orderedResults.map(r => {
+                const date = new Date(r.date);
+                const formattedDate = date.toLocaleDateString();
+                const formattedTime = date.toLocaleTimeString();
+                const rowRoomId = String(r.roomId || '').toUpperCase();
+                if (focusRoomId && rowRoomId === focusRoomId) {
+                    focusedResult = r;
+                }
+
+                const winnerRaw = String(r?.winner || '').trim();
+                const winnerNorm = winnerRaw.toLowerCase();
+                const p1Norm = String(r?.player1?.handle || '').toLowerCase();
+                const p2Norm = String(r?.player2?.handle || '').toLowerCase();
+
+                // Determine display order: winner always first (left/top), other second (right/bottom)
+                let leftPlayer = r.player1;
+                let rightPlayer = r.player2;
+                let leftScore = r.player1.score;
+                let rightScore = r.player2.score;
+                if (winnerNorm && winnerNorm !== 'tie') {
+                    if (winnerNorm === p2Norm) {
+                        leftPlayer = r.player2;
+                        rightPlayer = r.player1;
+                        leftScore = r.player2.score;
+                        rightScore = r.player1.score;
+                    }
+                }
+
+                let winnerHtml = '<span class="standing-badge standing-none">—</span>';
+                if (winnerNorm === 'tie') {
+                    winnerHtml = '<span class="standing-badge standing-tie">TIE</span>';
+                } else if (winnerNorm && winnerNorm === String(leftPlayer.handle).toLowerCase()) {
+                    winnerHtml = `
+                        <a href="#" data-handle="${leftPlayer.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(leftPlayer.rank)};">
+                            ${leftPlayer.handle}
+                        </a>
+                    `;
+                } else if (winnerNorm && winnerNorm === String(rightPlayer.handle).toLowerCase()) {
+                    winnerHtml = `
+                        <a href="#" data-handle="${rightPlayer.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(rightPlayer.rank)};">
+                            ${rightPlayer.handle}
+                        </a>
+                    `;
+                } else if (winnerRaw) {
+                    winnerHtml = `<span class="winner">${winnerRaw}</span>`;
+                }
+
+                return `
+                <tr data-room-id="${rowRoomId}">
+                    <td><strong>#${r.blitzNumber}</strong></td>
+                    <td>
+                        ${formattedDate}<br>
+                        <span class="timestamp">${formattedTime}</span>
+                    </td>
+                    <td>
+                        <a href="#" data-handle="${leftPlayer.handle}" class="player-link stats-user-link" style="color: ${getRankColor(leftPlayer.rank)};">
+                            ${leftPlayer.handle}
+                        </a>
+                    </td>
+                    <td><strong>${leftScore}</strong></td>
+                    <td>
+                        <a href="#" data-handle="${rightPlayer.handle}" class="player-link stats-user-link" style="color: ${getRankColor(rightPlayer.rank)};">
+                            ${rightPlayer.handle}
+                        </a>
+                    </td>
+                    <td><strong>${rightScore}</strong></td>
+                    <td>${winnerHtml}</td>
+                    <td><button class="details-btn" onclick='showDetails(${JSON.stringify(r).replace(/'/g, "\\'")})'>View</button></td>
+                </tr>
+            `}).join('');
+
+            if (focusRoomId) {
+                const targetRow = tbody.querySelector(`tr[data-room-id="${focusRoomId}"]`);
+                if (targetRow) {
+                    targetRow.classList.add('focused-result-row');
+                    targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    if (!focusedMatchModalOpened && focusedResult) {
+                        focusedMatchModalOpened = true;
+                        showDetails(focusedResult);
+                    }
+                }
+            }
+        }
+
+        function showDetails(result) {
+            modalTitle.textContent = `Blitz #${result.blitzNumber} Details`;
+
+            const date = new Date(result.date);
+            const formattedDateTime = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+            const winnerHandle = String(result?.winner || '').trim();
+            const winnerIsTie = winnerHandle.toLowerCase() === 'tie' || !winnerHandle;
+            const winnerMarkup = winnerIsTie
+                ? '<span class="standing-badge standing-tie">TIE</span>'
+                : `<a href="https://codeforces.com/profile/${encodeURIComponent(winnerHandle)}" target="_blank" rel="noopener noreferrer" class="player-link winner">${winnerHandle}</a>`;
+            const spectators = Array.isArray(result.spectators) ? result.spectators.filter(Boolean) : [];
+            const spectatorsText = spectators.length ? spectators.join(', ') : 'No spectators recorded';
+            const leaderboardHtml = buildResultLeaderboardMarkup(result);
+
+            modalContent.innerHTML = `
+                <p><strong>Date & Time:</strong> ${formattedDateTime}</p>
+                <p><strong>Duration:</strong> ${result.duration} minutes</p>
+                <p><strong>Winner:</strong> ${winnerMarkup}</p>
+                <p><strong>Spectators:</strong> ${spectatorsText}</p>
+                ${leaderboardHtml}
+            `;
+
+            modal.style.display = 'flex';
+        }
+
+        clearAllBtn.addEventListener('click', async () => {
+            const requesterHandle = getCurrentHandle();
+            if (!requesterHandle || !isAdminHandle(requesterHandle)) {
+                alert('Only admin can clear all results.');
+                return;
+            }
+
+            const adminPassword = prompt('Admin PIN required to clear all results:');
+            if (!adminPassword) {
+                return;
+            }
+
+            if (!confirm('Are you sure you want to clear all results? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/results?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'x-requester-handle': requesterHandle,
+                        'x-admin-password': adminPassword,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ requesterHandle, password: adminPassword })
+                });
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Could not clear results right now.');
+                    return;
+                }
+
+                loadResults();
+            } catch (error) {
+                console.error('Error clearing results:', error);
+                alert('Network error while clearing results.');
+            }
+        });
+
+        if (resultsSearchInput) {
+            resultsSearchInput.addEventListener('input', () => {
+                searchQuery = String(resultsSearchInput.value || '').trim().toLowerCase();
+                refreshResultsView();
+            });
+        }
+
+        confirmAdminPassword.addEventListener('click', () => {
+            adminPasswordModal.style.display = 'none';
+        });
+
+        cancelAdminPassword.addEventListener('click', () => {
+            adminPasswordModal.style.display = 'none';
+        });
+
+        closeModal.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        if (closeUserStatsModal) {
+            closeUserStatsModal.addEventListener('click', () => {
+                userStatsModal.style.display = 'none';
+            });
+        }
+
+        document.body.addEventListener('click', (event) => {
+            const handleLink = event.target.closest('.stats-user-link');
+            if (!handleLink) return;
+            const handle = handleLink.dataset.handle;
+            if (!handle) return;
+            event.preventDefault();
+            openUserStats(handle);
+        });
+
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+            if (e.target === adminPasswordModal) {
+                adminPasswordModal.style.display = 'none';
+            }
+            if (e.target === userStatsModal) {
+                userStatsModal.style.display = 'none';
+            }
+        });
+
+        window.addEventListener('storage', (event) => {
+            if (event.key === OWNER_KEY) {
+                syncAdminOnlyUiVisibility();
+            }
+        });
+
+        syncAdminOnlyUiVisibility();
+        connectResultsSocket();
+        startAutoRefresh();
+        loadResults();
+    </script>
+    <script src="../js/quick-nav-overflow.js"></script>
+    <script src="../js/floating-scrollbar.js"></script>
+    <script src="../js/search-suggestions.js"></script>
+</body>
+</html>
