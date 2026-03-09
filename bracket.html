@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PUC Blitz Cup · Bracket</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="bracket.css">
+    <link rel="stylesheet" href="floating-scrollbar.css">
+</head>
+<body>
+    <div class="container">
+        <div class="quick-nav">
+            <a href="index.html" class="quick-nav-btn">Arena</a>
+            <!-- <a href="index.html#roomControls" class="quick-nav-btn">Rooms</a> -->
+            <!-- <a href="index.html#activeBlitzSection" class="quick-nav-btn">Active</a> -->
+            <a href="bracket.html" class="quick-nav-btn">Bracket</a>
+            <a href="headtohead.html" class="quick-nav-btn">Head-to-Head</a>
+            <a href="profile.html" class="quick-nav-btn">Profile</a>
+            <a href="leaderboard.html" class="quick-nav-btn">Global Leaderboard</a>
+            <a href="results.html" class="quick-nav-btn">Results</a>
+            <a href="feedback.html" class="quick-nav-btn">Feedback</a>
+            <div class="quick-nav-account">
+                <a href="index.html?login=1" class="global-handle-chip not-verified" data-global-handle-chip>Login</a>
+            </div>
+        </div>
+
+        <header class="blitz-header">
+            <div>
+                <h1>Bracket Builder</h1>
+                <p class="subtitle">Create tournament structure for your blitz events</p>
+            </div>
+        </header>
+
+        <section class="panel">
+            <h2>Choose tournament type</h2>
+            <div class="type-grid" id="typeGrid">
+                <label class="type-card selected" data-type="round-robin">
+                    <input type="radio" name="tournamentType" value="round-robin" checked>
+                    <h3>Round Robin</h3>
+                    <p>Everyone plays with everyone, and the winner is determined by scores.</p>
+                </label>
+
+                <label class="type-card" data-type="single-elimination">
+                    <input type="radio" name="tournamentType" value="single-elimination">
+                    <h3>Single Elimination</h3>
+                    <p>Participants play one game each, and losers leave the tournament.</p>
+                </label>
+
+                <label class="type-card" data-type="double-elimination">
+                    <input type="radio" name="tournamentType" value="double-elimination">
+                    <h3>Double Elimination</h3>
+                    <p>Players get a second chance through a losers bracket before finals.</p>
+                </label>
+            </div>
+
+            <div class="form-grid">
+                <div>
+                    <label for="tournamentName">Tournament name</label>
+                    <input id="tournamentName" type="text" placeholder="PUC Blitz Cup Finals">
+                    <div class="create-options">
+                        <div>
+                            <label for="defaultMatchDuration">Duration (minutes)</label>
+                            <input id="defaultMatchDuration" type="number" min="2" max="60" value="40" step="1">
+                        </div>
+                        <div>
+                            <label for="defaultMatchInterval">Submission check interval (seconds)</label>
+                            <div style="position:relative;display:inline-block;">
+                                <input id="defaultMatchInterval" type="number" min="1" max="10" value="1" step="1" readonly style="padding-right:24px;cursor:not-allowed;">
+                                <span id="intervalLockIcon" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:1.1em;color:#b99;" title="Restricted">
+                                    <span style="cursor:not-allowed;display:inline-block;width:1.2em;">&#128274;</span>
+                                </span>
+                            </div>
+                        <script>
+                        // Show lock icon on hover for readonly interval input
+                        document.addEventListener('DOMContentLoaded', function() {
+                            var intervalInput = document.getElementById('defaultMatchInterval');
+                            var lockIcon = document.getElementById('intervalLockIcon');
+                            if (intervalInput && lockIcon) {
+                                function showLock() { lockIcon.style.display = 'inline'; }
+                                function hideLock(e) {
+                                    // Only hide if not hovering input or icon
+                                    if (!intervalInput.matches(':hover') && !lockIcon.matches(':hover')) {
+                                        lockIcon.style.display = 'none';
+                                    }
+                                }
+                                intervalInput.addEventListener('mouseenter', showLock);
+                                intervalInput.addEventListener('mouseleave', hideLock);
+                                lockIcon.addEventListener('mouseenter', showLock);
+                                lockIcon.addEventListener('mouseleave', hideLock);
+                            }
+                        });
+                        </script>
+                        </div>
+                    </div>
+
+                    <div class="config-group">
+                        <label>Problems <span id="bracketProblemsCount" style="font-weight:normal;color:#888;font-size:0.95em;"></span></label>
+                        <div id="bracketProblemsList" class="problems-list"></div>
+                        <button type="button" class="small-btn" id="bracketAddProblemBtn">Add Problem</button>
+                    </div>
+                </div>
+                <div>
+                    <label for="participantsInput">Participants (one per line)</label>
+                    <textarea id="participantsInput" rows="10" placeholder="tourist&#10;Benq&#10;ecnerwala&#10;Petr"></textarea>
+                    <div class="participants-tools">
+                        <button id="shuffleNamesBtn" type="button" class="small-btn">Shuffle Names</button>
+                    </div>
+                    <div id="shuffledNamesPreview" class="note" style="display:none;"></div>
+                </div>
+            </div>
+
+            <button id="generateBracketBtn" class="primary-btn">Generate Bracket</button>
+        </section>
+
+        <section class="panel" id="outputPanel" style="display:none;">
+            <div class="output-head">
+                <h2 id="outputTitle">Tournament Preview</h2>
+                <span class="meta" id="outputMeta"></span>
+            </div>
+            <div id="outputContent"></div>
+        </section>
+
+        <section class="panel">
+            <div class="output-head">
+                <h2>Saved Brackets</h2>
+                <span class="meta">Create brackets above, then manage matches here</span>
+            </div>
+            <div id="savedBracketsList" class="saved-list"></div>
+        </section>
+
+        <div id="cf-cache-status" style="font-size:12px;color:#666;margin:12px 0;">CF cache: loading…</div>
+
+        <div class="password-modal" id="userProfileModal">
+            <div class="password-content user-profile-content">
+                <h2>User Profile</h2>
+                <div id="userProfileBody" class="user-profile-body">Click on a verified handle to view profile details.</div>
+                <div class="password-buttons user-profile-actions">
+                    <button class="password-btn user-profile-logout-btn" id="userProfileLogoutBtn" style="display:none;">Logout</button>
+                    <button class="password-btn cancel-btn" id="closeUserProfileModal">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <footer class="site-footer">
+            <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
+            <p class="site-version">v3.1</p>
+            <p>
+                Developers:
+                <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,
+                <a href="https://codeforces.com/profile/MishkatIT" target="_blank" rel="noopener noreferrer">Mishkat</a>
+                | Tester: <a href="https://codeforces.com/profile/dip.barua" target="_blank" rel="noopener noreferrer">Dip</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="cf-user-info.js"></script>
+    <script src="global-profile-presence.js"></script>
+    <script src="quick-nav-overflow.js"></script>
+    <script src="floating-scrollbar.js"></script>
+    <script src="bracket.js"></script>
+    <script src="search-suggestions.js"></script>
+</body>
+</html>
