@@ -1713,6 +1713,7 @@ document.addEventListener('click', function(e) {
 
         // Always show battle UI and update timer
         showBattleUI();
+        try { document.body.classList.add('in-battle'); } catch (e) {}
         validationSection.style.display = 'none';
         renderLiveSpectatorList(roomData?.players || []);
         updatePlayerUI();
@@ -1958,6 +1959,9 @@ document.addEventListener('click', function(e) {
             // startP1HandleInput.disabled = true;
             // startP2HandleInput.disabled = true;
             fetchUserRanks();
+        
+            // mark page as in-room so CSS can show room-only sections
+            try { document.body.classList.add('in-room'); } catch (e) { /* ignore */ }
         } else {
             configDashboard.style.display = 'none';
             problemsDisplaySection.style.display = 'none';
@@ -3896,6 +3900,7 @@ document.addEventListener('click', function(e) {
         if (persistResult) {
             scheduleResultsRedirect(15000);
         }
+        try { document.body.classList.remove('in-battle'); } catch (e) {}
     }
 
     cancelGameBtn.addEventListener('click', () => {
@@ -4042,7 +4047,9 @@ document.addEventListener('click', function(e) {
         // Decorate any static CF profile links on the page to use CFUserInfo rendering
         function decorateStaticProfileLinks() {
             try {
-                const anchors = Array.from(document.querySelectorAll('a[href^="https://codeforces.com/profile/"]'));
+                // Find CF profile links but skip links inside the site footer
+                const anchors = Array.from(document.querySelectorAll('a[href^="https://codeforces.com/profile/"]'))
+                    .filter(a => !a.closest('.site-footer') && !a.classList.contains('no-cf'));
                 anchors.forEach(a => {
                     try {
                         const href = a.getAttribute('href') || '';
@@ -4067,7 +4074,7 @@ document.addEventListener('click', function(e) {
                 });
             } catch (e) {}
         }
-        decorateStaticProfileLinks();
+        // decorateStaticProfileLinks();
 
         // If CFUserInfo provides subscribe, refresh static links when info arrives
         if (window.CFUserInfo && typeof window.CFUserInfo.subscribe === 'function') {

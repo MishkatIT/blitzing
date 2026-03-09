@@ -1,7 +1,7 @@
 [
   {
-    "id": "HKKUQ4",
-    "name": "MITMAX's Room",
+    "id": "UAWDU3",
+    "name": "sdf",
     "players": [
       {
         "handle": "MITMAX"
@@ -10,7 +10,7 @@
     "host": "MITMAX",
     "hostHandle": "MITMAX",
     "opponentHandle": "greed_y",
-    "duration": 40,
+    "duration": 2,
     "interval": 1,
     "problems": [
       {
@@ -44,7 +44,7 @@
     ],
     "validationProblem": null,
     "battleState": null,
-    "createdAt": 1772949706442,
+    "createdAt": 1773062800236,
     "countdownEndsAt": null,
     "countdownInProgress": false,
     "firstProblemGenerationInProgress": false,

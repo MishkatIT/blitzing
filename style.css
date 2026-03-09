@@ -83,8 +83,8 @@
         align-items: stretch;
     }
     .config-validation-row > section,
-    .config-dashboard,
-    .validation-section {
+    body.in-room .config-dashboard,
+    body.in-room .validation-section {
         display: block !important;
         width: 100% !important;
         min-width: 0 !important;
@@ -219,6 +219,24 @@
     font-size: 1.1rem;
     margin-bottom: 6px;
     opacity: 0.7;
+}
+
+/* Ensure config dashboard and validation section remain hidden unless in a room.
+   This avoids responsive rules accidentally showing the ready-check outside a joined room. */
+#configDashboard,
+#validationSection {
+    display: none;
+}
+
+body.in-room #configDashboard,
+body.in-room #validationSection {
+    display: block;
+}
+
+/* When a battle is active, always hide config/validation even if in-room */
+body.in-room.in-battle #configDashboard,
+body.in-room.in-battle #validationSection {
+    display: none !important;
 }
 .vs-player-handle {
     color: #fff;
@@ -510,6 +528,19 @@ body {
     backdrop-filter: blur(10px);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+}
+
+/* Slightly increase the standings (leaderboard) panel width for better readability */
+.leaderboard {
+    max-width: 340px;
+    width: 100%;
+}
+
+@media (max-width: 900px) {
+    .leaderboard {
+        max-width: 100%;
+        width: 100%;
+    }
 }
 
 .blitz-header {
@@ -1578,6 +1609,25 @@ button:disabled {
     display: flex;
     flex-direction: column;
     gap: 2px;
+}
+
+/* Footer: reset handle-like link decorations */
+.site-footer {
+    margin-top: 20px;
+    color: var(--muted);
+    text-align: center;
+}
+.site-footer a {
+    color: var(--text);
+    background: none !important;
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    text-decoration: none;
+}
+.site-footer a:hover {
+    text-decoration: underline;
+    color: var(--primary);
 }
 
 .player-handle {

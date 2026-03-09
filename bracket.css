@@ -278,6 +278,74 @@ h1 {
     margin-bottom: 8px;
 }
 
+/* Make bracket problems list show a visible, themed scrollbar (match index) */
+#bracketProblemsList,
+.problems-list.bracket-specific {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(110,168,254,0.72) transparent;
+}
+
+#bracketProblemsList::-webkit-scrollbar,
+.problems-list.bracket-specific::-webkit-scrollbar {
+    width: 10px;
+}
+
+#bracketProblemsList::-webkit-scrollbar-track,
+.problems-list.bracket-specific::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#bracketProblemsList::-webkit-scrollbar-thumb,
+.problems-list.bracket-specific::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #79afff, #5a94ef);
+    border-radius: 999px;
+    border: 2px solid rgba(0,0,0,0.08);
+}
+
+/* Apply the same themed native scrollbar across other scrollable areas on bracket page */
+body.bracket-page,
+body.bracket-page textarea,
+body.bracket-page .saved-list,
+body.bracket-page .bracket-tree,
+body.bracket-page .user-profile-body,
+body.bracket-page .problems-list,
+body.bracket-page .panel {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(110,168,254,0.72) transparent;
+}
+
+body.bracket-page::-webkit-scrollbar,
+body.bracket-page textarea::-webkit-scrollbar,
+body.bracket-page .saved-list::-webkit-scrollbar,
+body.bracket-page .bracket-tree::-webkit-scrollbar,
+body.bracket-page .user-profile-body::-webkit-scrollbar,
+body.bracket-page .problems-list::-webkit-scrollbar,
+body.bracket-page .panel::-webkit-scrollbar {
+    width: 10px;
+}
+
+body.bracket-page::-webkit-scrollbar-track,
+body.bracket-page textarea::-webkit-scrollbar-track,
+body.bracket-page .saved-list::-webkit-scrollbar-track,
+body.bracket-page .bracket-tree::-webkit-scrollbar-track,
+body.bracket-page .user-profile-body::-webkit-scrollbar-track,
+body.bracket-page .problems-list::-webkit-scrollbar-track,
+body.bracket-page .panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+body.bracket-page::-webkit-scrollbar-thumb,
+body.bracket-page textarea::-webkit-scrollbar-thumb,
+body.bracket-page .saved-list::-webkit-scrollbar-thumb,
+body.bracket-page .bracket-tree::-webkit-scrollbar-thumb,
+body.bracket-page .user-profile-body::-webkit-scrollbar-thumb,
+body.bracket-page .problems-list::-webkit-scrollbar-thumb,
+body.bracket-page .panel::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #79afff, #5a94ef);
+    border-radius: 999px;
+    border: 2px solid rgba(0,0,0,0.08);
+}
+
 .create-problem-item {
     display: grid;
     grid-template-columns: 1fr 1fr auto;
@@ -292,6 +360,25 @@ h1 {
 .create-problem-item input,
 .create-problem-item select {
     width: 100%;
+}
+
+/* Style for rating select inside create-problem-item to match app theme */
+.create-problem-item .problem-rating-create {
+    width: 120px;
+    max-width: 45%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.create-problem-item .problem-rating-create:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(110,168,254,0.08);
 }
 
 .remove-create-problem {
@@ -368,7 +455,7 @@ textarea {
 
 .bracket-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 340px;
     gap: 12px;
     align-items: start;
 }
@@ -825,4 +912,24 @@ tr:first-child td {
         height: auto;
         padding: 8px;
     }
+}
+
+/* Remove underline from player/handle links inside bracket view */
+.player-chip a,
+.player-handle-max a,
+.player-handle-ultra-first a,
+.player-handle-ultra-rest a,
+.global-handle-chip,
+.global-handle-chip a {
+    text-decoration: none;
+    text-decoration-skip-ink: none;
+}
+
+.player-chip a:hover,
+.player-handle-max a:hover,
+.player-handle-ultra-first a:hover,
+.player-handle-ultra-rest a:hover,
+.global-handle-chip:hover,
+.global-handle-chip a:hover {
+    text-decoration: none;
 }

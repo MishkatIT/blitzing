@@ -63,7 +63,7 @@ const CFUserInfo = (() => {
     // Requests older than this will be refreshed in the background when tracked.
     // Cache TTL: return cached info immediately if fetched within this window.
     // Requests older than this will be refreshed in the background when tracked.
-    const FETCH_TTL_MS = 1 * 60 * 1000; // 1 minute
+    const FETCH_TTL_MS = 5 * 60 * 1000; // 5 minutes
     const LOCALSTORAGE_KEY = 'CFUserInfoCache_v1';
 
     // Persist a compact snapshot of handleMap to localStorage so we can

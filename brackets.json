@@ -1,13 +1,17 @@
 [
   {
-    "id": "b_1772930782240_mx91iz",
+    "id": "b_1773066277739_rhj93v",
     "name": "Tournament",
-    "type": "double-elimination",
+    "type": "round-robin",
     "ownerHandle": "MITMAX",
     "participants": [
-      "MishkatIT",
-      "tourist",
-      "um_nik"
+      "ns",
+      "sdf",
+      "werwer",
+      "ban",
+      "pak",
+      "sri",
+      "MITMAX"
     ],
     "roomConfig": {
       "problemCount": 7,
@@ -49,9 +53,9 @@
       {
         "id": "m1",
         "round": 1,
-        "label": "Round 1 · Match 1",
-        "p1": "MishkatIT",
-        "p2": "tourist",
+        "label": "Round 1 · Match 2",
+        "p1": "sdf",
+        "p2": "MITMAX",
         "bracketSide": "main",
         "status": "pending",
         "winner": null,
@@ -61,28 +65,21 @@
       {
         "id": "m2",
         "round": 1,
-        "label": "Round 1 · Match 2",
-        "p1": "um_nik",
-        "p2": "BYE",
+        "label": "Round 1 · Match 3",
+        "p1": "werwer",
+        "p2": "sri",
         "bracketSide": "main",
-        "status": "completed",
-        "winner": "um_nik",
+        "status": "pending",
+        "winner": null,
         "roomId": null,
-        "result": {
-          "winnerOriginal": "um_nik",
-          "winnerResolved": "um_nik",
-          "player1Score": null,
-          "player2Score": 0,
-          "finishedAt": "2026-03-08T00:46:22.242Z",
-          "autoAdvanced": "bye"
-        }
+        "result": null
       },
       {
         "id": "m3",
-        "round": 2,
-        "label": "Round 2 · Match 1",
-        "p1": "Winner M1",
-        "p2": "um_nik",
+        "round": 1,
+        "label": "Round 1 · Match 4",
+        "p1": "ban",
+        "p2": "pak",
         "bracketSide": "main",
         "status": "pending",
         "winner": null,
@@ -91,11 +88,11 @@
       },
       {
         "id": "m4",
-        "round": 1,
-        "label": "Losers Round 1",
-        "p1": "Loser Slot 1A",
-        "p2": "Loser Slot 1B",
-        "bracketSide": "losers",
+        "round": 2,
+        "label": "Round 2 · Match 1",
+        "p1": "ns",
+        "p2": "MITMAX",
+        "bracketSide": "main",
         "status": "pending",
         "winner": null,
         "roomId": null,
@@ -104,10 +101,10 @@
       {
         "id": "m5",
         "round": 2,
-        "label": "Losers Round 2",
-        "p1": "Loser Slot 2A",
-        "p2": "Loser Slot 2B",
-        "bracketSide": "losers",
+        "label": "Round 2 · Match 3",
+        "p1": "sdf",
+        "p2": "pak",
+        "bracketSide": "main",
         "status": "pending",
         "winner": null,
         "roomId": null,
@@ -115,30 +112,230 @@
       },
       {
         "id": "m6",
+        "round": 2,
+        "label": "Round 2 · Match 4",
+        "p1": "werwer",
+        "p2": "ban",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m7",
         "round": 3,
-        "label": "Grand Final",
-        "p1": "um_nik",
-        "p2": "Losers Bracket Champion",
-        "bracketSide": "final",
+        "label": "Round 3 · Match 1",
+        "p1": "ns",
+        "p2": "sri",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m8",
+        "round": 3,
+        "label": "Round 3 · Match 2",
+        "p1": "MITMAX",
+        "p2": "pak",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m9",
+        "round": 3,
+        "label": "Round 3 · Match 4",
+        "p1": "sdf",
+        "p2": "werwer",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m10",
+        "round": 4,
+        "label": "Round 4 · Match 1",
+        "p1": "ns",
+        "p2": "pak",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m11",
+        "round": 4,
+        "label": "Round 4 · Match 2",
+        "p1": "sri",
+        "p2": "ban",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m12",
+        "round": 4,
+        "label": "Round 4 · Match 3",
+        "p1": "MITMAX",
+        "p2": "werwer",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m13",
+        "round": 5,
+        "label": "Round 5 · Match 1",
+        "p1": "ns",
+        "p2": "ban",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m14",
+        "round": 5,
+        "label": "Round 5 · Match 2",
+        "p1": "pak",
+        "p2": "werwer",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m15",
+        "round": 5,
+        "label": "Round 5 · Match 3",
+        "p1": "sri",
+        "p2": "sdf",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m16",
+        "round": 6,
+        "label": "Round 6 · Match 1",
+        "p1": "ns",
+        "p2": "werwer",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m17",
+        "round": 6,
+        "label": "Round 6 · Match 2",
+        "p1": "ban",
+        "p2": "sdf",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m18",
+        "round": 6,
+        "label": "Round 6 · Match 4",
+        "p1": "sri",
+        "p2": "MITMAX",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m19",
+        "round": 7,
+        "label": "Round 7 · Match 1",
+        "p1": "ns",
+        "p2": "sdf",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m20",
+        "round": 7,
+        "label": "Round 7 · Match 3",
+        "p1": "ban",
+        "p2": "MITMAX",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m21",
+        "round": 7,
+        "label": "Round 7 · Match 4",
+        "p1": "pak",
+        "p2": "sri",
+        "bracketSide": "main",
         "status": "pending",
         "winner": null,
         "roomId": null,
         "result": null
       }
     ],
-    "createdAt": "2026-03-08T00:46:22.242Z",
+    "createdAt": "2026-03-09T14:24:37.739Z",
     "handleProfiles": {
-      "MishkatIT": {
-        "rating": 1214,
-        "maxRating": 1443,
-        "rankClass": "rank-specialist"
+      "ns": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
       },
-      "tourist": {
-        "rating": 3718,
-        "maxRating": 4009,
-        "rankClass": "rank-lgm"
+      "sdf": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
       },
-      "um_nik": {
+      "werwer": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
+      },
+      "ban": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
+      },
+      "pak": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
+      },
+      "sri": {
+        "rating": null,
+        "maxRating": null,
+        "rankClass": "rank-newbie"
+      },
+      "MITMAX": {
         "rating": null,
         "maxRating": null,
         "rankClass": "rank-newbie"
